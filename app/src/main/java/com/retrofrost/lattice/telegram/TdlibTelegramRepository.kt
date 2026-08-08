@@ -3,6 +3,7 @@ package com.retrofrost.lattice.telegram
 import android.content.Context
 import android.os.Build
 import com.retrofrost.lattice.BuildConfig
+import com.retrofrost.lattice.privacy.TorSupport
 import io.xbot.tdlib.TdLib
 import java.io.Closeable
 import java.util.Locale
@@ -30,6 +31,8 @@ class TdlibTelegramRepository(
     private var apiId: Int = BuildConfig.TELEGRAM_API_ID
     private var apiHash: String = BuildConfig.TELEGRAM_API_HASH
     private var waitingForParameters = false
+    private var privacyProxyConfigured = false
+    private var privacyProxyRequestPending = false
 
     private val _state = MutableStateFlow(TelegramUiState())
     override val state: StateFlow<TelegramUiState> = _state.asStateFlow()
@@ -40,7 +43,7 @@ class TdlibTelegramRepository(
     override fun start() {
         if (!running.compareAndSet(false, true)) return
         clientId = TdLib.createClientId()
-        _state.value = _state.value.copy(connectionLabel = "TDLib started")
+        _state.value = _state.value.copy(connectionLabel = "TDLib started — network locked")
         scope.launch { receiveLoop() }
     }
 
@@ -65,7 +68,11 @@ class TdlibTelegramRepository(
         }
         this.apiId = apiId
         this.apiHash = apiHash.trim()
-        if (waitingForParameters) sendTdlibParameters()
+        if (waitingForParameters) prepareInitialization()
+    }
+
+    override fun retryPrivacyRoute() {
+        if (waitingForParameters) prepareInitialization()
     }
 
     override fun submitPhoneNumber(phoneNumber: String) {
@@ -145,6 +152,22 @@ class TdlibTelegramRepository(
         val responseClientId = objectJson.optInt("@client_id", clientId)
         if (responseClientId != clientId) return
 
+        if (objectJson.optString("@extra") == TOR_PROXY_EXTRA) {
+            privacyProxyRequestPending = false
+            if (objectJson.optString("@type") == "addedProxy") {
+                privacyProxyConfigured = true
+                _state.value = _state.value.copy(connectionLabel = "Tor proxy enabled — direct fallback blocked", lastError = null)
+                sendTdlibParameters()
+            } else {
+                updateAuth(
+                    TelegramAuthStage.WaitPrivacyRoute(TorSupport.isOrbotInstalled(appContext)),
+                    "Tor proxy setup failed — Telegram remains paused"
+                )
+                setError(objectJson.optString("message", "TDLib could not enable the Tor SOCKS5 proxy."))
+            }
+            return
+        }
+
         when (objectJson.optString("@type")) {
             "updateAuthorizationState" -> handleAuthorizationState(objectJson.getJSONObject("authorization_state"))
             "updateConnectionState" -> handleConnectionState(objectJson.optJSONObject("state"))
@@ -160,10 +183,9 @@ class TdlibTelegramRepository(
         when (auth.optString("@type")) {
             "authorizationStateWaitTdlibParameters" -> {
                 waitingForParameters = true
-                if (isConfigured) sendTdlibParameters()
-                else updateAuth(TelegramAuthStage.NeedApiCredentials, "Telegram API credentials required")
+                prepareInitialization()
             }
-            "authorizationStateWaitPhoneNumber" -> updateAuth(TelegramAuthStage.WaitPhoneNumber, "Ready to log in")
+            "authorizationStateWaitPhoneNumber" -> updateAuth(TelegramAuthStage.WaitPhoneNumber, "Ready to log in through Tor")
             "authorizationStateWaitCode" -> {
                 val length = auth.optJSONObject("code_info")
                     ?.optJSONObject("type")
@@ -183,7 +205,7 @@ class TdlibTelegramRepository(
             }
             "authorizationStateReady" -> {
                 waitingForParameters = false
-                updateAuth(TelegramAuthStage.Ready, "Connected")
+                updateAuth(TelegramAuthStage.Ready, "Connected through privacy proxy")
                 refreshChats()
             }
             "authorizationStateLoggingOut", "authorizationStateClosing" -> updateAuth(TelegramAuthStage.Closing, "Closing Telegram session")
@@ -191,20 +213,59 @@ class TdlibTelegramRepository(
         }
     }
 
+    private fun prepareInitialization() {
+        if (!isConfigured) {
+            updateAuth(TelegramAuthStage.NeedApiCredentials, "Telegram API credentials required — network locked")
+            return
+        }
+        if (!TorSupport.isOrbotInstalled(appContext)) {
+            updateAuth(TelegramAuthStage.WaitPrivacyRoute(false), "Orbot required — Telegram network is paused")
+            return
+        }
+        if (privacyProxyConfigured) {
+            sendTdlibParameters()
+            return
+        }
+        if (!privacyProxyRequestPending) configureTorProxy()
+    }
+
+    private fun configureTorProxy() {
+        privacyProxyRequestPending = true
+        updateAuth(TelegramAuthStage.WaitPrivacyRoute(true), "Enabling Tor SOCKS5 route…")
+        val proxy = JSONObject()
+            .put("@type", "proxy")
+            .put("server", TorSupport.DEFAULT_SOCKS_HOST)
+            .put("port", TorSupport.DEFAULT_SOCKS_PORT)
+            .put(
+                "type",
+                JSONObject()
+                    .put("@type", "proxyTypeSocks5")
+                    .put("username", "")
+                    .put("password", "")
+            )
+        send(
+            JSONObject()
+                .put("@type", "addProxy")
+                .put("proxy", proxy)
+                .put("enable", true)
+                .put("@extra", TOR_PROXY_EXTRA)
+        )
+    }
+
     private fun handleConnectionState(stateJson: JSONObject?) {
         val label = when (stateJson?.optString("@type")) {
-            "connectionStateWaitingForNetwork" -> "Waiting for network"
-            "connectionStateConnectingToProxy" -> "Connecting to privacy proxy"
-            "connectionStateConnecting" -> "Connecting to Telegram"
-            "connectionStateUpdating" -> "Syncing Telegram"
-            "connectionStateReady" -> "Connected"
+            "connectionStateWaitingForNetwork" -> "Waiting for network through Tor"
+            "connectionStateConnectingToProxy" -> "Connecting to Tor"
+            "connectionStateConnecting" -> "Connecting to Telegram through Tor"
+            "connectionStateUpdating" -> "Syncing Telegram through Tor"
+            "connectionStateReady" -> "Connected through privacy proxy"
             else -> return
         }
         _state.value = _state.value.copy(connectionLabel = label)
     }
 
     private fun sendTdlibParameters() {
-        if (!isConfigured) return
+        if (!isConfigured || !privacyProxyConfigured) return
         waitingForParameters = false
         val dbDir = appContext.filesDir.resolve("tdlib/database").apply { mkdirs() }.absolutePath
         val filesDir = appContext.filesDir.resolve("tdlib/files").apply { mkdirs() }.absolutePath
@@ -318,5 +379,9 @@ class TdlibTelegramRepository(
 
     private fun setError(message: String) {
         _state.value = _state.value.copy(lastError = message)
+    }
+
+    private companion object {
+        const val TOR_PROXY_EXTRA = "lattice_tor_proxy_setup"
     }
 }
