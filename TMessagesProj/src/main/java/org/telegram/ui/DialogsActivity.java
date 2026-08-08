@@ -11352,6 +11352,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         delegate = dialogsActivityDelegate;
     }
 
+    public void setLatticePreselectedDialogs(ArrayList<Long> dialogIds) {
+        selectedDialogs.clear();
+        if (dialogIds != null) {
+            selectedDialogs.addAll(dialogIds);
+        }
+    }
+
     public void setSharedMedia(ArrayList<MediaController.PhotoEntry> entries, CharSequence initialCaption) {
         if (entries == null || entries.isEmpty()) {
             sharedMediaEntries = null;

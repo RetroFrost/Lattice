@@ -43,6 +43,7 @@ import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.LatticeChatPreferences;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
@@ -116,6 +117,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
     @Keep
     private int emailLoginRow;
     private int privacyShadowRow;
+    private int latticeFilesOnlyRow;
     private int groupsRow;
     private int groupsDetailRow;
     private int securitySectionRow;
@@ -415,6 +417,8 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_PHONE));
             } else if (position == groupsRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_INVITE));
+            } else if (position == latticeFilesOnlyRow) {
+                presentFragment(new LatticeFilesOnlyActivity());
             } else if (position == callsRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_CALLS));
             } else if (position == profilePhotoRow) {
@@ -751,6 +755,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         bioRow = rowCount++;
         musicRow = rowCount++;
         groupsRow = rowCount++;
+        latticeFilesOnlyRow = rowCount++;
         privacyShadowRow = rowCount++;
 
         if (getMessagesController().autoarchiveAvailable || getUserConfig().isPremium()) {
@@ -1020,7 +1025,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == passcodeRow || position == passwordRow || position == passkeysRow || position == blockedRow || position == sessionsRow || position == secretWebpageRow || position == webSessionsRow ||
+            return position == latticeFilesOnlyRow || position == passcodeRow || position == passwordRow || position == passkeysRow || position == blockedRow || position == sessionsRow || position == secretWebpageRow || position == webSessionsRow ||
                     position == groupsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_INVITE) ||
                     position == lastSeenRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_LASTSEEN) ||
                     position == callsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_CALLS) ||
@@ -1109,6 +1114,10 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                             value = formatRulesString(getAccountInstance(), ContactsController.PRIVACY_RULES_TYPE_INVITE);
                         }
                         textCell.setTextAndValue(getString(R.string.PrivacyInvites), value, false);
+                    } else if (position == latticeFilesOnlyRow) {
+                        int count = LatticeChatPreferences.getFilesOnlyDialogsCount();
+                        value = count == 0 ? "Off" : String.format(LocaleController.getInstance().getCurrentLocale(), "%d selected", count);
+                        textCell.setTextAndValue("Files-only chats", value, true);
                     } else if (position == callsRow) {
                         if (getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_CALLS)) {
                             showLoading = true;
@@ -1390,7 +1399,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         @Override
         public int getItemViewType(int position) {
             if (position == passportRow || position == lastSeenRow || position == phoneNumberRow ||
-                    position == deleteAccountRow || position == webSessionsRow || position == groupsRow || position == paymentsClearRow ||
+                    position == deleteAccountRow || position == webSessionsRow || position == groupsRow || position == latticeFilesOnlyRow || position == paymentsClearRow ||
                     position == secretMapRow || position == contactsDeleteRow || position == botsBiometryRow) {
                 return 0;
             } else if (position == privacyShadowRow || position == deleteAccountDetailRow || position == groupsDetailRow || position == sessionsDetailRow || position == secretDetailRow || position == botsDetailRow || position == contactsDetailRow || position == newChatsSectionRow) {
