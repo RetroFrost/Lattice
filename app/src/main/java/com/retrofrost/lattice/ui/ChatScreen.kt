@@ -1,11 +1,14 @@
 package com.retrofrost.lattice.ui
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,17 +28,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.retrofrost.lattice.model.LatticeSettings
 import com.retrofrost.lattice.privacy.ContentFilterEngine
 import com.retrofrost.lattice.telegram.TelegramMessageItem
 import com.retrofrost.lattice.telegram.TelegramUiState
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -47,7 +54,9 @@ fun ChatScreen(
     state: TelegramUiState,
     settings: LatticeSettings,
     onBack: () -> Unit,
-    onSend: (String) -> Unit
+    onSend: (String) -> Unit,
+    onDownloadFile: (Int) -> Unit,
+    onCancelDownload: (Int) -> Unit
 ) {
     var draft by remember(state.activeChatId) { mutableStateOf("") }
     var revealedMessages by remember(state.activeChatId) { mutableStateOf(emptySet<Long>()) }
@@ -110,24 +119,32 @@ fun ChatScreen(
                     }
                 }
             }
-
-            state.lastError?.let { error ->
-                item { Text(error, color = MaterialTheme.colorScheme.error) }
-            }
-
-            if (!state.messagesLoading && state.activeMessages.isEmpty()) {
-                item { Text("No messages in this chat yet.") }
-            }
+            state.lastError?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
+            if (!state.messagesLoading && state.activeMessages.isEmpty()) item { Text("No messages in this chat yet.") }
 
             items(state.activeMessages, key = { it.id }) { message ->
                 val decision = ContentFilterEngine.evaluate(message, settings)
+                val shouldAutoDownload = shouldAutoDownload(message, settings)
+                LaunchedEffect(message.mediaFileId, message.mediaDownloadComplete, shouldAutoDownload, decision.action) {
+                    val fileId = message.mediaFileId
+                    if (
+                        fileId != null &&
+                        shouldAutoDownload &&
+                        !message.mediaDownloadComplete &&
+                        !message.mediaDownloadActive &&
+                        decision.action != ContentFilterEngine.Action.HIDE_PAID &&
+                        decision.action != ContentFilterEngine.Action.COLLAPSE
+                    ) {
+                        onDownloadFile(fileId)
+                    }
+                }
                 MessageBubble(
                     message = message,
                     decision = decision,
                     revealed = message.id in revealedMessages,
-                    onShowOnce = {
-                        revealedMessages = revealedMessages + message.id
-                    }
+                    onShowOnce = { revealedMessages = revealedMessages + message.id },
+                    onDownloadFile = onDownloadFile,
+                    onCancelDownload = onCancelDownload
                 )
             }
         }
@@ -139,8 +156,13 @@ private fun MessageBubble(
     message: TelegramMessageItem,
     decision: ContentFilterEngine.Decision,
     revealed: Boolean,
-    onShowOnce: () -> Unit
+    onShowOnce: () -> Unit,
+    onDownloadFile: (Int) -> Unit,
+    onCancelDownload: (Int) -> Unit
 ) {
+    val showRaw = revealed && decision.action == ContentFilterEngine.Action.COLLAPSE
+    val mediaAllowed = decision.action == ContentFilterEngine.Action.SHOW || showRaw
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isOutgoing) Arrangement.End else Arrangement.Start
@@ -148,55 +170,90 @@ private fun MessageBubble(
         Card(modifier = Modifier.fillMaxWidth(0.82f)) {
             Column(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
+                verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                val showRaw = revealed && decision.action == ContentFilterEngine.Action.COLLAPSE
-                Text(
-                    if (showRaw) message.text else decision.displayText,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-
-                if (!showRaw && decision.reason != null) {
-                    Text(decision.reason, style = MaterialTheme.typography.bodySmall)
+                if (mediaAllowed) {
+                    LocalMediaPreview(message)
                 }
 
+                Text(if (showRaw) message.text else decision.displayText, style = MaterialTheme.typography.bodyLarge)
+
+                if (!showRaw && decision.reason != null) Text(decision.reason, style = MaterialTheme.typography.bodySmall)
                 if (!showRaw && decision.allowShowOnce) {
-                    OutlinedButton(onClick = onShowOnce) {
-                        Text("Show once")
-                    }
+                    OutlinedButton(onClick = onShowOnce) { Text("Show once") }
                 }
 
-                if (isMediaKind(message.contentKind)) {
-                    Text(
-                        mediaPolicyLabel(message.contentKind),
-                        style = MaterialTheme.typography.labelSmall
-                    )
+                if (mediaAllowed) {
+                    MediaDownloadControls(message, onDownloadFile, onCancelDownload)
                 }
 
-                Text(
-                    formatMessageTime(message.date),
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.align(Alignment.End)
-                )
+                Text(formatMessageTime(message.date), style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.End))
             }
         }
     }
 }
 
-private fun isMediaKind(kind: String): Boolean {
-    val lower = kind.lowercase()
-    return lower.contains("photo") || lower.contains("video") || lower.contains("animation") ||
-        lower.contains("document") || lower.contains("audio") || lower.contains("voice") || lower.contains("sticker")
+@Composable
+private fun LocalMediaPreview(message: TelegramMessageItem) {
+    if (!message.mediaDownloadComplete || !isImageKind(message.contentKind)) return
+    val path = message.mediaPath ?: return
+    val bitmap = remember(path) {
+        runCatching {
+            if (File(path).isFile) BitmapFactory.decodeFile(path) else null
+        }.getOrNull()
+    } ?: return
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = null,
+        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+        contentScale = ContentScale.Fit
+    )
 }
 
-private fun mediaPolicyLabel(kind: String): String = when {
-    kind.contains("paid", ignoreCase = true) -> "Stars media • hidden by Maximum Privacy"
-    kind.contains("photo", ignoreCase = true) -> "Photo • manual download policy"
-    kind.contains("video", ignoreCase = true) -> "Video • manual download / autoplay off"
-    kind.contains("animation", ignoreCase = true) -> "GIF • autoplay off"
-    kind.contains("voice", ignoreCase = true) -> "Voice • manual download policy"
-    kind.contains("document", ignoreCase = true) -> "File • manual download policy"
-    else -> "Media • privacy controls active"
+@Composable
+private fun MediaDownloadControls(
+    message: TelegramMessageItem,
+    onDownloadFile: (Int) -> Unit,
+    onCancelDownload: (Int) -> Unit
+) {
+    val fileId = message.mediaFileId ?: return
+    when {
+        message.mediaDownloadComplete -> {
+            val size = formatSize(message.mediaSize)
+            Text(if (size.isBlank()) "Downloaded privately" else "Downloaded privately • $size", style = MaterialTheme.typography.labelSmall)
+        }
+        message.mediaDownloadActive -> {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator()
+                OutlinedButton(onClick = { onCancelDownload(fileId) }) { Text("Cancel") }
+            }
+        }
+        else -> {
+            OutlinedButton(onClick = { onDownloadFile(fileId) }) { Text("Download") }
+            val size = formatSize(message.mediaSize)
+            Text(if (size.isBlank()) "Manual download through privacy route" else "$size • manual download through privacy route", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+private fun shouldAutoDownload(message: TelegramMessageItem, settings: LatticeSettings): Boolean = when {
+    message.contentKind.equals("messagePhoto", true) -> settings.autoDownloadPhotos
+    message.contentKind.equals("messageVideo", true) -> settings.autoDownloadVideos
+    message.contentKind.equals("messageAnimation", true) -> settings.autoDownloadVideos
+    message.contentKind.equals("messageVoiceNote", true) -> settings.autoDownloadVoice
+    message.contentKind.equals("messageVideoNote", true) -> settings.autoDownloadVideoMessages
+    message.contentKind.equals("messageDocument", true) -> settings.autoDownloadFiles
+    else -> false
+}
+
+private fun isImageKind(kind: String): Boolean =
+    kind.equals("messagePhoto", true) || kind.equals("messageSticker", true)
+
+private fun formatSize(bytes: Long): String = when {
+    bytes <= 0L -> ""
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "${bytes / 1024L} KB"
+    else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
 }
 
 private fun formatMessageTime(unixSeconds: Int): String {
