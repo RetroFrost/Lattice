@@ -68,6 +68,7 @@ fun LatticeApp(incomingLink: String?) {
     MaterialTheme(colorScheme = colors) {
         var settings by remember { mutableStateOf(LatticeSettings()) }
         var showSettings by remember { mutableStateOf(false) }
+        val activeChatId = telegramState.activeChatId
 
         if (telegramState.authStage != TelegramAuthStage.Ready) {
             AuthScreen(state = telegramState, repository = repository)
@@ -77,12 +78,21 @@ fun LatticeApp(incomingLink: String?) {
                 onSettingsChange = { settings = it },
                 onBack = { showSettings = false }
             )
+        } else if (activeChatId != null) {
+            val chat = telegramState.chats.firstOrNull { it.id == activeChatId }
+            ChatScreen(
+                title = chat?.title ?: "Telegram chat",
+                state = telegramState,
+                onBack = repository::closeChat,
+                onSend = { repository.sendTextMessage(activeChatId, it) }
+            )
         } else {
             HomeScreen(
                 incomingLink = incomingLink,
                 state = telegramState,
                 onOpenSettings = { showSettings = true },
-                onRefresh = repository::refreshChats
+                onRefresh = repository::refreshChats,
+                onOpenChat = repository::openChat
             )
         }
     }
@@ -94,7 +104,8 @@ private fun HomeScreen(
     incomingLink: String?,
     state: TelegramUiState,
     onOpenSettings: () -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenChat: (Long) -> Unit
 ) {
     val tabs = listOf(
         HomeTab("Chats", Icons.Outlined.Message),
@@ -151,7 +162,7 @@ private fun HomeScreen(
                         Column(modifier = Modifier.padding(start = 12.dp)) {
                             Text("Maximum Privacy", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "TDLib is connected. Optional Telegram features remain disabled unless you enable them.",
+                                "TDLib is connected through the privacy route. Optional Telegram features stay disabled unless you enable them.",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
@@ -189,7 +200,7 @@ private fun HomeScreen(
                 item { Text("No chats loaded in this section yet.") }
             } else {
                 items(visibleChats, key = { it.id }) { chat ->
-                    ChatRow(chat)
+                    ChatRow(chat = chat, onClick = { onOpenChat(chat.id) })
                 }
             }
         }
@@ -197,8 +208,8 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun ChatRow(chat: TelegramChatSummary) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun ChatRow(chat: TelegramChatSummary, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(chat.title, style = MaterialTheme.typography.titleMedium)
             if (chat.preview.isNotBlank()) {
