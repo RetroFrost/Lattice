@@ -28,4 +28,4 @@ TDLib is not wired into this first foundation commit yet. The UI talks to a `Tel
 
 ## Build
 
-GitHub Actions builds a debug APK using JDK 17, Gradle 9.5 and Android API 37. Pushes to `main` run the APK build automatically. Locally, use a compatible Gradle 9.5 installation until the Gradle wrapper is committed.
+GitHub Actions builds a debug APK using JDK 17, Gradle 9.5 and Android API 36 (Android 16). Pushes to `main` run the APK build automatically. Locally, use a compatible Gradle 9.5 installation until the Gradle wrapper is committed.
