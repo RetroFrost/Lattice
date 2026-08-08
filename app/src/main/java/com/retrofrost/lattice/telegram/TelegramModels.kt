@@ -37,6 +37,15 @@ data class TelegramMessageItem(
     val contentKind: String
 )
 
+data class TelegramInvitePreview(
+    val inviteLink: String,
+    val title: String,
+    val description: String,
+    val memberCount: Int,
+    val createsJoinRequest: Boolean,
+    val requiresSubscription: Boolean
+)
+
 data class TelegramUiState(
     val authStage: TelegramAuthStage = TelegramAuthStage.Initializing,
     val connectionLabel: String = "Starting TDLib…",
@@ -44,5 +53,6 @@ data class TelegramUiState(
     val activeChatId: Long? = null,
     val activeMessages: List<TelegramMessageItem> = emptyList(),
     val messagesLoading: Boolean = false,
+    val pendingInvite: TelegramInvitePreview? = null,
     val lastError: String? = null
 )
