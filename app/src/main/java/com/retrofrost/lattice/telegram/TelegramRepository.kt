@@ -19,5 +19,9 @@ interface TelegramRepository {
     fun submitEmailAddress(email: String)
     fun submitEmailCode(code: String)
     fun register(firstName: String, lastName: String)
+
     fun refreshChats()
+    fun openChat(chatId: Long)
+    fun closeChat()
+    fun sendTextMessage(chatId: Long, text: String)
 }
