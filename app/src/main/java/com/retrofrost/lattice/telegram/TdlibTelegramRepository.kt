@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.retrofrost.lattice.BuildConfig
 import com.retrofrost.lattice.privacy.TorSupport
+import com.retrofrost.lattice.security.TdlibDatabaseKeyStore
 import io.xbot.tdlib.TdLib
 import java.io.Closeable
 import java.util.Locale
@@ -266,6 +267,11 @@ class TdlibTelegramRepository(
 
     private fun sendTdlibParameters() {
         if (!isConfigured || !privacyProxyConfigured) return
+        val databaseKey = runCatching { TdlibDatabaseKeyStore.getOrCreateBase64Key(appContext) }
+            .onFailure { setError("Local database security setup failed: ${it.message ?: it.javaClass.simpleName}") }
+            .getOrNull()
+            ?: return
+
         waitingForParameters = false
         val dbDir = appContext.filesDir.resolve("tdlib/database").apply { mkdirs() }.absolutePath
         val filesDir = appContext.filesDir.resolve("tdlib/files").apply { mkdirs() }.absolutePath
@@ -274,7 +280,7 @@ class TdlibTelegramRepository(
             .put("use_test_dc", false)
             .put("database_directory", dbDir)
             .put("files_directory", filesDir)
-            .put("database_encryption_key", "")
+            .put("database_encryption_key", databaseKey)
             .put("use_file_database", true)
             .put("use_chat_info_database", true)
             .put("use_message_database", true)
