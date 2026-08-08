@@ -3,6 +3,7 @@ package com.retrofrost.lattice.telegram
 sealed interface TelegramAuthStage {
     data object Initializing : TelegramAuthStage
     data object NeedApiCredentials : TelegramAuthStage
+    data class WaitPrivacyRoute(val orbotInstalled: Boolean) : TelegramAuthStage
     data object WaitPhoneNumber : TelegramAuthStage
     data class WaitCode(val codeLength: Int? = null) : TelegramAuthStage
     data object WaitPassword : TelegramAuthStage
