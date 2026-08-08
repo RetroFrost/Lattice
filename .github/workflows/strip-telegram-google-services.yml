@@ -1,0 +1,45 @@
+name: Strip Telegram Google Services identity
+
+on:
+  push:
+    branches: [ lattice-telegram-base ]
+    paths:
+      - ".github/workflows/strip-telegram-google-services.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  strip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lattice-telegram-base
+          token: ${{ github.token }}
+      - name: Remove Google Services plugin from Telegram library
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('TMessagesProj/build.gradle')
+          text = p.read_text()
+          line = "apply plugin: 'com.google.gms.google-services'\n"
+          if text.count(line) != 1:
+              raise SystemExit(f'Expected exactly one Google Services plugin application, got {text.count(line)}')
+          p.write_text(text.replace(line, '', 1))
+
+          bootstrap = Path('scripts/bootstrap_lattice.py')
+          b = bootstrap.read_text()
+          marker = 'print("Lattice fork patches applied successfully")'
+          insertion = """# Do not inherit Telegram's official Firebase/Google Services identity.\np = Path(\"TMessagesProj/build.gradle\")\ntext = p.read_text()\ntext = text.replace(\"apply plugin: 'com.google.gms.google-services'\\n\", \"\")\np.write_text(text)\n\n"""
+          if marker not in b:
+              raise SystemExit('Bootstrap completion marker not found')
+          bootstrap.write_text(b.replace(marker, insertion + marker, 1))
+          PY
+      - name: Commit privacy cleanup
+        run: |
+          git config user.name "RetroFrost"
+          git config user.email "actions@users.noreply.github.com"
+          git add TMessagesProj/build.gradle scripts/bootstrap_lattice.py
+          git commit -m "Detach Lattice from Telegram Firebase identity"
+          git push origin HEAD:lattice-telegram-base
