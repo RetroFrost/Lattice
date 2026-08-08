@@ -1,6 +1,8 @@
 package com.retrofrost.lattice.ui
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,18 +29,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
+import com.retrofrost.lattice.privacy.TorSupport
 import com.retrofrost.lattice.telegram.TelegramAuthStage
 import com.retrofrost.lattice.telegram.TelegramRepository
 import com.retrofrost.lattice.telegram.TelegramUiState
@@ -77,6 +81,7 @@ fun AuthScreen(state: TelegramUiState, repository: TelegramRepository) {
             when (val stage = state.authStage) {
                 TelegramAuthStage.Initializing -> Text("Starting Telegram…")
                 TelegramAuthStage.NeedApiCredentials -> ApiCredentialsForm(repository)
+                is TelegramAuthStage.WaitPrivacyRoute -> PrivacyRouteForm(stage.orbotInstalled, repository)
                 TelegramAuthStage.WaitPhoneNumber -> PhoneForm(repository)
                 is TelegramAuthStage.WaitCode -> CodeForm(stage.codeLength, repository)
                 TelegramAuthStage.WaitPassword -> PasswordForm(repository)
@@ -119,6 +124,41 @@ private fun ApiCredentialsForm(repository: TelegramRepository) {
         enabled = apiId.toIntOrNull() != null && apiHash.isNotBlank(),
         modifier = Modifier.fillMaxWidth()
     ) { Text("Continue") }
+}
+
+@Composable
+private fun PrivacyRouteForm(orbotInstalled: Boolean, repository: TelegramRepository) {
+    val context = LocalContext.current
+    Text("Tor privacy route", style = MaterialTheme.typography.headlineSmall)
+    Text(
+        if (orbotInstalled) {
+            "Orbot is installed. Start Tor, then retry. Lattice will not connect directly to Telegram."
+        } else {
+            "Maximum Privacy requires Orbot before Telegram can connect. Direct fallback is disabled."
+        }
+    )
+    OutlinedButton(
+        onClick = {
+            val launchIntent = if (orbotInstalled) {
+                context.packageManager.getLaunchIntentForPackage(TorSupport.ORBOT_PACKAGE)
+            } else null
+            if (launchIntent != null) {
+                context.startActivity(launchIntent)
+            } else {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://orbot.app/")))
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(if (orbotInstalled) "Open Orbot" else "Get Orbot")
+    }
+    Button(onClick = repository::retryPrivacyRoute, modifier = Modifier.fillMaxWidth()) {
+        Text("Retry Tor connection")
+    }
+    Text(
+        "Telegram remains paused until the SOCKS5 privacy route is enabled.",
+        style = MaterialTheme.typography.bodySmall
+    )
 }
 
 @Composable
