@@ -57,12 +57,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.retrofrost.lattice.model.LatticeSettings
 import com.retrofrost.lattice.model.LatticeSettingsStore
 import com.retrofrost.lattice.privacy.ContentFilterEngine
+import com.retrofrost.lattice.privacy.LatticeNotificationManager
 import com.retrofrost.lattice.telegram.TdlibTelegramRepository
 import com.retrofrost.lattice.telegram.TelegramAuthStage
 import com.retrofrost.lattice.telegram.TelegramChatSummary
 import com.retrofrost.lattice.telegram.TelegramMessageItem
 import com.retrofrost.lattice.telegram.TelegramUiState
 import java.io.File
+import kotlinx.coroutines.flow.collect
 
 private data class HomeTab(val title: String, val icon: ImageVector)
 
@@ -73,10 +75,28 @@ fun LatticeApp(incomingLink: String?) {
     val repository = remember { TdlibTelegramRepository(context.applicationContext) }
     val telegramState by repository.state.collectAsStateWithLifecycle()
     val settingsStore = remember { LatticeSettingsStore(context.applicationContext) }
+    val notifier = remember { LatticeNotificationManager(context.applicationContext) }
 
     DisposableEffect(repository) {
         repository.start()
         onDispose { repository.close() }
+    }
+
+    LaunchedEffect(repository, notifier) {
+        val knownUnread = mutableMapOf<Long, Int>()
+        repository.state.collect { snapshot ->
+            snapshot.chats.forEach { chat ->
+                val previous = knownUnread[chat.id]
+                if (
+                    previous != null &&
+                    chat.unreadCount > previous &&
+                    snapshot.activeChatId != chat.id
+                ) {
+                    notifier.showUnread(chat, settingsStore.load())
+                }
+                knownUnread[chat.id] = chat.unreadCount
+            }
+        }
     }
 
     LaunchedEffect(incomingLink, telegramState.authStage) {
@@ -278,9 +298,7 @@ private fun ChatAvatar(chat: TelegramChatSummary) {
         )
     } else {
         Surface(modifier = Modifier.size(48.dp), shape = CircleShape, tonalElevation = 2.dp) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(chat.title.firstOrNull()?.uppercase() ?: "?")
-            }
+            Box(contentAlignment = Alignment.Center) { Text(chat.title.firstOrNull()?.uppercase() ?: "?") }
         }
     }
 }
