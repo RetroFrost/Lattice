@@ -11,6 +11,7 @@ interface TelegramRepository {
     fun openLink(rawLink: String): TelegramLinkTarget?
 
     fun setApiCredentials(apiId: Int, apiHash: String)
+    fun retryPrivacyRoute()
     fun submitPhoneNumber(phoneNumber: String)
     fun requestQrLogin()
     fun submitCode(code: String)
