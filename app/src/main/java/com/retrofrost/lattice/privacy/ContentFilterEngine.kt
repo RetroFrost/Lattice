@@ -18,7 +18,13 @@ object ContentFilterEngine {
         val lower = raw.lowercase()
         val kind = message.contentKind.lowercase()
 
-        if (settings.hidePaidMedia && (kind.contains("paidmedia") || kind.contains("paid_media"))) {
+        if (settings.hidePaidMedia && (
+                kind.contains("paidmedia") ||
+                kind.contains("paid_media") ||
+                lower == "paid media" ||
+                lower == "stars media"
+            )
+        ) {
             return Decision(
                 Action.HIDE_PAID,
                 "Paid media hidden",
@@ -28,30 +34,15 @@ object ContentFilterEngine {
         }
 
         if (!settings.showSexualMaterial && looksSexual(lower, kind, settings)) {
-            return Decision(
-                Action.COLLAPSE,
-                "Sexual content hidden",
-                "Hidden locally by Sexual content filters.",
-                true
-            )
+            return Decision(Action.COLLAPSE, "Sexual content hidden", "Hidden locally by Sexual content filters.", true)
         }
 
         if (settings.goreFilter && looksGraphic(lower, kind, settings)) {
-            return Decision(
-                Action.COLLAPSE,
-                "Graphic content hidden",
-                "Hidden locally by Gore filters.",
-                true
-            )
+            return Decision(Action.COLLAPSE, "Graphic content hidden", "Hidden locally by Gore filters.", true)
         }
 
         if (settings.spamFilter && looksSpam(lower)) {
-            return Decision(
-                Action.COLLAPSE,
-                "Suspected spam hidden",
-                "Collapsed locally. The Telegram message was not deleted or reported.",
-                true
-            )
+            return Decision(Action.COLLAPSE, "Suspected spam hidden", "Collapsed locally. The Telegram message was not deleted or reported.", true)
         }
 
         if (settings.swearingFilter && containsSwearing(lower)) {
