@@ -28,9 +28,21 @@ data class TelegramChatSummary(
     enum class Kind { PRIVATE, GROUP, CHANNEL_OR_SUPERGROUP, SECRET, UNKNOWN }
 }
 
+data class TelegramMessageItem(
+    val id: Long,
+    val chatId: Long,
+    val text: String,
+    val isOutgoing: Boolean,
+    val date: Int,
+    val contentKind: String
+)
+
 data class TelegramUiState(
     val authStage: TelegramAuthStage = TelegramAuthStage.Initializing,
     val connectionLabel: String = "Starting TDLib…",
     val chats: List<TelegramChatSummary> = emptyList(),
+    val activeChatId: Long? = null,
+    val activeMessages: List<TelegramMessageItem> = emptyList(),
+    val messagesLoading: Boolean = false,
     val lastError: String? = null
 )
