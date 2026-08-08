@@ -115,6 +115,7 @@ import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.LatticeChatPreferences;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
@@ -8128,6 +8129,15 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                             R.string.CommunityHiddenChannelUnavailable :
                             R.string.CommunityHiddenGroupUnavailable
                         )).show();
+                    } else if (chat != null && LatticeChatPreferences.isFilesOnly(dialogId)) {
+                        Bundle mediaArgs = new Bundle();
+                        mediaArgs.putLong("dialog_id", dialogId);
+                        mediaArgs.putInt("type", MediaActivity.TYPE_MEDIA);
+                        mediaArgs.putInt("start_from", SharedMediaLayout.TAB_FILES);
+                        if (sharedMediaPreloader == null) {
+                            sharedMediaPreloader = new SharedMediaLayout.SharedMediaPreloader(this);
+                        }
+                        presentFragment(new MediaActivity(mediaArgs, sharedMediaPreloader));
                     } else if (chat != null && (chat.monoforum || chat.forum) && topicId == 0) {
                         if (chat.monoforum) {
                             args.putInt("chatMode", ChatActivity.MODE_SUGGESTIONS);

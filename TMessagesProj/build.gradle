@@ -1,5 +1,11 @@
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 
+// Lattice is an unofficial Telegram client. Supply its own API credentials at build time.
+def rawLatticeApiId = (project.findProperty('TELEGRAM_API_ID') ?: System.getenv('TELEGRAM_API_ID') ?: '0').toString()
+def latticeApiId = rawLatticeApiId.matches('[0-9]+') ? rawLatticeApiId : '0'
+def latticeApiHash = (project.findProperty('TELEGRAM_API_HASH') ?: System.getenv('TELEGRAM_API_HASH') ?: '').toString()
+def escapedLatticeApiHash = latticeApiHash.replace('\', '\\').replace('"', '\"')
+
 apply plugin: 'com.android.library'
 
 repositories {
@@ -112,6 +118,9 @@ android {
     defaultConfig {
         minSdkVersion 21
         targetSdkVersion 35
+
+        buildConfigField "int", "LATTICE_API_ID", latticeApiId
+        buildConfigField "String", "LATTICE_API_HASH", "\"${escapedLatticeApiHash}\""
 
         vectorDrawables.generatedDensities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi']
 

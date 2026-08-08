@@ -34,6 +34,7 @@ import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.LatticeChatPreferences;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
@@ -69,8 +70,10 @@ public class MediaActivity extends BaseFragment implements SharedMediaLayout.Sha
     public static final int TYPE_STORIES = 1;
     public static final int TYPE_ARCHIVED_CHANNEL_STORIES = 2;
     public static final int TYPE_STORIES_SEARCH = 3;
+    private static final int LATTICE_FILES_ONLY_ITEM = 42001;
 
     private int type;
+    private ActionBarMenuItem latticeFilesOnlyItem;
 
     private SharedMediaLayout.SharedMediaPreloader sharedMediaPreloader;
     private TLRPC.ChatFull currentChatInfo;
@@ -209,6 +212,18 @@ public class MediaActivity extends BaseFragment implements SharedMediaLayout.Sha
                             dialog.redPositive();
                         }
                     }
+                } else if (id == LATTICE_FILES_ONLY_ITEM) {
+                    boolean enabled = LatticeChatPreferences.toggleFilesOnly(dialogId);
+                    if (latticeFilesOnlyItem != null) {
+                        latticeFilesOnlyItem.setAlpha(enabled ? 1f : .55f);
+                    }
+                    if (enabled && sharedMediaLayout != null) {
+                        sharedMediaLayout.scrollToPage(SharedMediaLayout.TAB_FILES);
+                    }
+                    BulletinFactory.of(MediaActivity.this).createSimpleBulletin(
+                        R.raw.contact_check,
+                        enabled ? "Files-only mode enabled" : "Files-only mode disabled"
+                    ).show();
                 } else if (id == 10) {
                     sharedMediaLayout.showMediaCalendar(sharedMediaLayout.getClosestTab(), false);
                 } else if (id == 11) {
@@ -270,6 +285,11 @@ public class MediaActivity extends BaseFragment implements SharedMediaLayout.Sha
         fragmentView.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundGray));
 
         ActionBarMenu menu2 = actionBar.createMenu();
+        if (type == TYPE_MEDIA && dialogId < 0) {
+            latticeFilesOnlyItem = menu2.addItem(LATTICE_FILES_ONLY_ITEM, R.drawable.msg_file, getResourceProvider());
+            latticeFilesOnlyItem.setContentDescription("Toggle files-only mode for this chat");
+            latticeFilesOnlyItem.setAlpha(LatticeChatPreferences.isFilesOnly(dialogId) ? 1f : .55f);
+        }
         if (type == TYPE_STORIES || type == TYPE_ARCHIVED_CHANNEL_STORIES) {
             FrameLayout menu = new FrameLayout(context);
             actionBar.addView(menu, LayoutHelper.createFrame(56, 56, Gravity.RIGHT | Gravity.BOTTOM));
