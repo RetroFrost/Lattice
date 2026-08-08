@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import android.util.Base64
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -53,10 +52,8 @@ object TdlibDatabaseKeyStore {
             try {
                 generateWrappingKey(strongBox = true)
                 return
-            } catch (_: StrongBoxUnavailableException) {
-                // Fall back to the device's normal Android Keystore implementation.
             } catch (_: Exception) {
-                // Some devices advertise StrongBox but reject AES-GCM key generation.
+                // StrongBox is optional. Fall back to the normal Android Keystore.
             }
         }
         generateWrappingKey(strongBox = false)
