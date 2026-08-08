@@ -27,4 +27,6 @@ interface TelegramRepository {
     fun openChat(chatId: Long)
     fun closeChat()
     fun sendTextMessage(chatId: Long, text: String)
+    fun downloadFile(fileId: Int)
+    fun cancelDownload(fileId: Int)
 }
