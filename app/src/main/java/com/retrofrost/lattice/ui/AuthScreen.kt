@@ -232,11 +232,13 @@ private fun QrConfirmation(link: String) {
     Text("Open Telegram on a device where you're already logged in and scan this code. TDLib refreshes the QR link automatically.")
     if (link.isNotBlank()) {
         val bitmap = remember(link) { qrBitmap(link, 720) }
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Telegram login QR code",
-            modifier = Modifier.size(280.dp).align(Alignment.CenterHorizontally)
-        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Telegram login QR code",
+                modifier = Modifier.size(280.dp)
+            )
+        }
         Spacer(Modifier.height(4.dp))
         Text(link, style = MaterialTheme.typography.bodySmall)
     }
