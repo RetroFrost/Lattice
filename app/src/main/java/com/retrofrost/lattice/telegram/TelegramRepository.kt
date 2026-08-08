@@ -9,6 +9,9 @@ interface TelegramRepository {
     fun start()
     fun stop()
     fun openLink(rawLink: String): TelegramLinkTarget?
+    fun openTelegramLink(rawLink: String)
+    fun joinPendingInvite()
+    fun dismissPendingInvite()
 
     fun setApiCredentials(apiId: Int, apiHash: String)
     fun retryPrivacyRoute()
