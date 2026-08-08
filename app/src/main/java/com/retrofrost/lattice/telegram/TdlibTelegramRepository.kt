@@ -52,9 +52,7 @@ class TdlibTelegramRepository(
 
     override fun stop() {
         if (!running.compareAndSet(true, false)) return
-        if (clientId != 0) {
-            send(JSONObject().put("@type", "close"))
-        }
+        if (clientId != 0) send(JSONObject().put("@type", "close"))
     }
 
     override fun close() {
@@ -70,10 +68,7 @@ class TdlibTelegramRepository(
             return
         }
         when (val target = openLink(rawLink)) {
-            is TelegramLinkTarget.Username -> {
-                if (target.messageId == null) requestPublicChat(target.username)
-                else requestMessageLink(rawLink)
-            }
+            is TelegramLinkTarget.Username -> if (target.messageId == null) requestPublicChat(target.username) else requestMessageLink(rawLink)
             is TelegramLinkTarget.PrivatePost -> requestMessageLink(rawLink)
             is TelegramLinkTarget.Invite -> requestInvite(rawLink)
             is TelegramLinkTarget.TelegramScheme -> requestInternalLink(rawLink)
@@ -83,12 +78,7 @@ class TdlibTelegramRepository(
 
     override fun joinPendingInvite() {
         val inviteLink = pendingInviteLink ?: _state.value.pendingInvite?.inviteLink ?: return
-        send(
-            JSONObject()
-                .put("@type", "joinChatByInviteLink")
-                .put("invite_link", inviteLink)
-                .put("@extra", LINK_JOIN_EXTRA)
-        )
+        send(JSONObject().put("@type", "joinChatByInviteLink").put("invite_link", inviteLink).put("@extra", LINK_JOIN_EXTRA))
     }
 
     override fun dismissPendingInvite() {
@@ -111,20 +101,11 @@ class TdlibTelegramRepository(
     }
 
     override fun submitPhoneNumber(phoneNumber: String) {
-        send(
-            JSONObject()
-                .put("@type", "setAuthenticationPhoneNumber")
-                .put("phone_number", phoneNumber.trim())
-                .put("settings", JSONObject.NULL)
-        )
+        send(JSONObject().put("@type", "setAuthenticationPhoneNumber").put("phone_number", phoneNumber.trim()).put("settings", JSONObject.NULL))
     }
 
     override fun requestQrLogin() {
-        send(
-            JSONObject()
-                .put("@type", "requestQrCodeAuthentication")
-                .put("other_user_ids", JSONArray())
-        )
+        send(JSONObject().put("@type", "requestQrCodeAuthentication").put("other_user_ids", JSONArray()))
     }
 
     override fun submitCode(code: String) {
@@ -143,12 +124,7 @@ class TdlibTelegramRepository(
         send(
             JSONObject()
                 .put("@type", "checkAuthenticationEmailCode")
-                .put(
-                    "code",
-                    JSONObject()
-                        .put("@type", "emailAddressAuthenticationCode")
-                        .put("code", code.trim())
-                )
+                .put("code", JSONObject().put("@type", "emailAddressAuthenticationCode").put("code", code.trim()))
         )
     }
 
@@ -163,12 +139,7 @@ class TdlibTelegramRepository(
     }
 
     override fun refreshChats() {
-        send(
-            JSONObject()
-                .put("@type", "loadChats")
-                .put("chat_list", JSONObject().put("@type", "chatListMain"))
-                .put("limit", 100)
-        )
+        send(JSONObject().put("@type", "loadChats").put("chat_list", JSONObject().put("@type", "chatListMain")).put("limit", 100))
     }
 
     override fun openChat(chatId: Long) {
@@ -179,22 +150,13 @@ class TdlibTelegramRepository(
         val chatId = _state.value.activeChatId ?: return
         send(JSONObject().put("@type", "closeChat").put("chat_id", chatId))
         synchronized(activeMessages) { activeMessages.clear() }
-        _state.value = _state.value.copy(
-            activeChatId = null,
-            activeMessages = emptyList(),
-            messagesLoading = false,
-            lastError = null
-        )
+        _state.value = _state.value.copy(activeChatId = null, activeMessages = emptyList(), messagesLoading = false, lastError = null)
     }
 
     override fun sendTextMessage(chatId: Long, text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
-
-        val formattedText = JSONObject()
-            .put("@type", "formattedText")
-            .put("text", trimmed)
-            .put("entities", JSONArray())
+        val formattedText = JSONObject().put("@type", "formattedText").put("text", trimmed).put("entities", JSONArray())
         val linkPreviewOptions = JSONObject()
             .put("@type", "linkPreviewOptions")
             .put("is_disabled", true)
@@ -207,7 +169,6 @@ class TdlibTelegramRepository(
             .put("text", formattedText)
             .put("link_preview_options", linkPreviewOptions)
             .put("clear_draft", true)
-
         send(
             JSONObject()
                 .put("@type", "sendMessage")
@@ -220,53 +181,45 @@ class TdlibTelegramRepository(
         )
     }
 
-    private fun requestPublicChat(username: String) {
+    override fun downloadFile(fileId: Int) {
+        if (fileId <= 0) return
         send(
             JSONObject()
-                .put("@type", "searchPublicChat")
-                .put("username", username)
-                .put("@extra", LINK_PUBLIC_CHAT_EXTRA)
+                .put("@type", "downloadFile")
+                .put("file_id", fileId)
+                .put("priority", 16)
+                .put("offset", 0)
+                .put("limit", 0)
+                .put("synchronous", false)
         )
     }
 
+    override fun cancelDownload(fileId: Int) {
+        if (fileId <= 0) return
+        send(JSONObject().put("@type", "cancelDownloadFile").put("file_id", fileId).put("only_if_pending", false))
+    }
+
+    private fun requestPublicChat(username: String) {
+        send(JSONObject().put("@type", "searchPublicChat").put("username", username).put("@extra", LINK_PUBLIC_CHAT_EXTRA))
+    }
+
     private fun requestMessageLink(url: String) {
-        send(
-            JSONObject()
-                .put("@type", "getMessageLinkInfo")
-                .put("url", url)
-                .put("@extra", LINK_MESSAGE_EXTRA)
-        )
+        send(JSONObject().put("@type", "getMessageLinkInfo").put("url", url).put("@extra", LINK_MESSAGE_EXTRA))
     }
 
     private fun requestInvite(inviteLink: String) {
         pendingInviteLink = inviteLink
         _state.value = _state.value.copy(pendingInvite = null, lastError = null)
-        send(
-            JSONObject()
-                .put("@type", "checkChatInviteLink")
-                .put("invite_link", inviteLink)
-                .put("@extra", LINK_INVITE_EXTRA)
-        )
+        send(JSONObject().put("@type", "checkChatInviteLink").put("invite_link", inviteLink).put("@extra", LINK_INVITE_EXTRA))
     }
 
     private fun requestInternalLink(link: String) {
-        send(
-            JSONObject()
-                .put("@type", "getInternalLinkType")
-                .put("link", link)
-                .put("@extra", LINK_INTERNAL_EXTRA)
-        )
+        send(JSONObject().put("@type", "getInternalLinkType").put("link", link).put("@extra", LINK_INTERNAL_EXTRA))
     }
 
     private fun openChatInternal(chatId: Long, fromMessageId: Long) {
         synchronized(activeMessages) { activeMessages.clear() }
-        _state.value = _state.value.copy(
-            activeChatId = chatId,
-            activeMessages = emptyList(),
-            messagesLoading = true,
-            pendingInvite = null,
-            lastError = null
-        )
+        _state.value = _state.value.copy(activeChatId = chatId, activeMessages = emptyList(), messagesLoading = true, pendingInvite = null, lastError = null)
         send(JSONObject().put("@type", "openChat").put("chat_id", chatId))
         send(
             JSONObject()
@@ -284,9 +237,7 @@ class TdlibTelegramRepository(
         while (running.get()) {
             val raw = runCatching { TdLib.receive(1.0) }
                 .onFailure { setError("TDLib receive failed: ${it.message ?: it.javaClass.simpleName}") }
-                .getOrNull()
-                ?: continue
-
+                .getOrNull() ?: continue
             runCatching { handle(JSONObject(raw)) }
                 .onFailure { setError("TDLib update parse failed: ${it.message ?: it.javaClass.simpleName}") }
         }
@@ -295,37 +246,15 @@ class TdlibTelegramRepository(
     private fun handle(objectJson: JSONObject) {
         val responseClientId = objectJson.optInt("@client_id", clientId)
         if (responseClientId != clientId) return
-
         val extra = objectJson.optString("@extra")
         when {
-            extra == TOR_PROXY_EXTRA -> {
-                handleTorProxyResponse(objectJson)
-                return
-            }
-            extra.startsWith(HISTORY_EXTRA_PREFIX) -> {
-                handleHistoryResponse(extra, objectJson)
-                return
-            }
-            extra == LINK_PUBLIC_CHAT_EXTRA -> {
-                handlePublicChatResponse(objectJson)
-                return
-            }
-            extra == LINK_MESSAGE_EXTRA -> {
-                handleMessageLinkResponse(objectJson)
-                return
-            }
-            extra == LINK_INVITE_EXTRA -> {
-                handleInviteResponse(objectJson)
-                return
-            }
-            extra == LINK_JOIN_EXTRA -> {
-                handleJoinResponse(objectJson)
-                return
-            }
-            extra == LINK_INTERNAL_EXTRA -> {
-                handleInternalLinkResponse(objectJson)
-                return
-            }
+            extra == TOR_PROXY_EXTRA -> { handleTorProxyResponse(objectJson); return }
+            extra.startsWith(HISTORY_EXTRA_PREFIX) -> { handleHistoryResponse(extra, objectJson); return }
+            extra == LINK_PUBLIC_CHAT_EXTRA -> { handlePublicChatResponse(objectJson); return }
+            extra == LINK_MESSAGE_EXTRA -> { handleMessageLinkResponse(objectJson); return }
+            extra == LINK_INVITE_EXTRA -> { handleInviteResponse(objectJson); return }
+            extra == LINK_JOIN_EXTRA -> { handleJoinResponse(objectJson); return }
+            extra == LINK_INTERNAL_EXTRA -> { handleInternalLinkResponse(objectJson); return }
         }
 
         when (objectJson.optString("@type")) {
@@ -333,12 +262,14 @@ class TdlibTelegramRepository(
             "updateConnectionState" -> handleConnectionState(objectJson.optJSONObject("state"))
             "updateNewChat" -> objectJson.optJSONObject("chat")?.let(::upsertChat)
             "updateChatTitle" -> updateTitle(objectJson.optLong("chat_id"), objectJson.optString("title"))
+            "updateChatPhoto" -> updateChatPhoto(objectJson)
             "updateChatPosition" -> updatePosition(objectJson)
             "updateChatLastMessage" -> updateLastMessage(objectJson)
             "updateChatReadInbox" -> updateUnread(objectJson.optLong("chat_id"), objectJson.optInt("unread_count"))
             "updateNewMessage" -> objectJson.optJSONObject("message")?.let(::upsertActiveMessage)
             "updateMessageContent" -> updateMessageContent(objectJson)
             "updateDeleteMessages" -> removeMessages(objectJson)
+            "updateFile" -> objectJson.optJSONObject("file")?.let(::updateFile)
             "error" -> setError(objectJson.optString("message", "Telegram returned an unknown error."))
         }
     }
@@ -350,10 +281,7 @@ class TdlibTelegramRepository(
             _state.value = _state.value.copy(connectionLabel = "Tor proxy enabled — direct fallback blocked", lastError = null)
             sendTdlibParameters()
         } else {
-            updateAuth(
-                TelegramAuthStage.WaitPrivacyRoute(TorSupport.isOrbotInstalled(appContext)),
-                "Tor proxy setup failed — Telegram remains paused"
-            )
+            updateAuth(TelegramAuthStage.WaitPrivacyRoute(TorSupport.isOrbotInstalled(appContext)), "Tor proxy setup failed — Telegram remains paused")
             setError(objectJson.optString("message", "TDLib could not enable the Tor SOCKS5 proxy."))
         }
     }
@@ -366,7 +294,6 @@ class TdlibTelegramRepository(
             setError(response.optString("message", "Unable to load chat history."))
             return
         }
-
         val items = response.optJSONArray("messages") ?: JSONArray()
         synchronized(activeMessages) {
             for (index in 0 until items.length()) {
@@ -378,39 +305,23 @@ class TdlibTelegramRepository(
     }
 
     private fun handlePublicChatResponse(response: JSONObject) {
-        if (response.optString("@type") == "error") {
-            setError(response.optString("message", "Public Telegram chat wasn't found."))
-            return
-        }
-        if (response.optString("@type") != "chat") {
-            setError("Telegram returned an unexpected public-chat response.")
-            return
-        }
+        if (response.optString("@type") == "error") { setError(response.optString("message", "Public Telegram chat wasn't found.")); return }
+        if (response.optString("@type") != "chat") { setError("Telegram returned an unexpected public-chat response."); return }
         upsertChat(response)
-        val chatId = response.optLong("id")
-        if (chatId != 0L) openChat(chatId)
+        response.optLong("id").takeIf { it != 0L }?.let(::openChat)
     }
 
     private fun handleMessageLinkResponse(response: JSONObject) {
-        if (response.optString("@type") == "error") {
-            setError(response.optString("message", "Telegram message link couldn't be opened."))
-            return
-        }
+        if (response.optString("@type") == "error") { setError(response.optString("message", "Telegram message link couldn't be opened.")); return }
         val chatId = response.optLong("chat_id")
-        if (chatId == 0L) {
-            setError("The linked Telegram chat isn't accessible.")
-            return
-        }
+        if (chatId == 0L) { setError("The linked Telegram chat isn't accessible."); return }
         val linkedMessage = response.optJSONObject("message")
         openChatInternal(chatId, linkedMessage?.optLong("id") ?: 0L)
         linkedMessage?.let(::upsertActiveMessage)
     }
 
     private fun handleInviteResponse(response: JSONObject) {
-        if (response.optString("@type") == "error") {
-            setError(response.optString("message", "Telegram invite link is invalid or unavailable."))
-            return
-        }
+        if (response.optString("@type") == "error") { setError(response.optString("message", "Telegram invite link is invalid or unavailable.")); return }
         val inviteLink = pendingInviteLink ?: return
         val chatId = response.optLong("chat_id")
         if (chatId != 0L) {
@@ -433,26 +344,16 @@ class TdlibTelegramRepository(
     }
 
     private fun handleJoinResponse(response: JSONObject) {
-        if (response.optString("@type") == "error") {
-            setError(response.optString("message", "Unable to join this Telegram chat."))
-            return
-        }
-        if (response.optString("@type") != "chat") {
-            setError("Telegram returned an unexpected join response.")
-            return
-        }
+        if (response.optString("@type") == "error") { setError(response.optString("message", "Unable to join this Telegram chat.")); return }
+        if (response.optString("@type") != "chat") { setError("Telegram returned an unexpected join response."); return }
         pendingInviteLink = null
         _state.value = _state.value.copy(pendingInvite = null, lastError = null)
         upsertChat(response)
-        val chatId = response.optLong("id")
-        if (chatId != 0L) openChat(chatId)
+        response.optLong("id").takeIf { it != 0L }?.let(::openChat)
     }
 
     private fun handleInternalLinkResponse(response: JSONObject) {
-        if (response.optString("@type") == "error") {
-            setError(response.optString("message", "Telegram link couldn't be resolved."))
-            return
-        }
+        if (response.optString("@type") == "error") { setError(response.optString("message", "Telegram link couldn't be resolved.")); return }
         when (response.optString("@type")) {
             "internalLinkTypePublicChat" -> requestPublicChat(response.optString("chat_username"))
             "internalLinkTypeMessage" -> requestMessageLink(response.optString("url"))
@@ -463,51 +364,27 @@ class TdlibTelegramRepository(
 
     private fun handleAuthorizationState(auth: JSONObject) {
         when (auth.optString("@type")) {
-            "authorizationStateWaitTdlibParameters" -> {
-                waitingForParameters = true
-                prepareInitialization()
-            }
+            "authorizationStateWaitTdlibParameters" -> { waitingForParameters = true; prepareInitialization() }
             "authorizationStateWaitPhoneNumber" -> updateAuth(TelegramAuthStage.WaitPhoneNumber, "Ready to log in through Tor")
             "authorizationStateWaitCode" -> {
-                val length = auth.optJSONObject("code_info")
-                    ?.optJSONObject("type")
-                    ?.optInt("length")
-                    ?.takeIf { it > 0 }
+                val length = auth.optJSONObject("code_info")?.optJSONObject("type")?.optInt("length")?.takeIf { it > 0 }
                 updateAuth(TelegramAuthStage.WaitCode(length), "Authentication code required")
             }
             "authorizationStateWaitPassword" -> updateAuth(TelegramAuthStage.WaitPassword, "Two-step verification required")
             "authorizationStateWaitEmailAddress" -> updateAuth(TelegramAuthStage.WaitEmailAddress, "Email address required")
             "authorizationStateWaitEmailCode" -> updateAuth(TelegramAuthStage.WaitEmailCode, "Email code required")
             "authorizationStateWaitRegistration" -> updateAuth(TelegramAuthStage.WaitRegistration, "Registration details required")
-            "authorizationStateWaitOtherDeviceConfirmation" -> {
-                updateAuth(
-                    TelegramAuthStage.WaitOtherDeviceConfirmation(auth.optString("link")),
-                    "Scan with another Telegram device"
-                )
-            }
-            "authorizationStateReady" -> {
-                waitingForParameters = false
-                updateAuth(TelegramAuthStage.Ready, "Connected through privacy proxy")
-                refreshChats()
-            }
+            "authorizationStateWaitOtherDeviceConfirmation" -> updateAuth(TelegramAuthStage.WaitOtherDeviceConfirmation(auth.optString("link")), "Scan with another Telegram device")
+            "authorizationStateReady" -> { waitingForParameters = false; updateAuth(TelegramAuthStage.Ready, "Connected through privacy proxy"); refreshChats() }
             "authorizationStateLoggingOut", "authorizationStateClosing" -> updateAuth(TelegramAuthStage.Closing, "Closing Telegram session")
             "authorizationStateClosed" -> updateAuth(TelegramAuthStage.Closed, "TDLib closed")
         }
     }
 
     private fun prepareInitialization() {
-        if (!isConfigured) {
-            updateAuth(TelegramAuthStage.NeedApiCredentials, "Telegram API credentials required — network locked")
-            return
-        }
-        if (!TorSupport.isOrbotInstalled(appContext)) {
-            updateAuth(TelegramAuthStage.WaitPrivacyRoute(false), "Orbot required — Telegram network is paused")
-            return
-        }
-        if (privacyProxyConfigured) {
-            sendTdlibParameters()
-            return
-        }
+        if (!isConfigured) { updateAuth(TelegramAuthStage.NeedApiCredentials, "Telegram API credentials required — network locked"); return }
+        if (!TorSupport.isOrbotInstalled(appContext)) { updateAuth(TelegramAuthStage.WaitPrivacyRoute(false), "Orbot required — Telegram network is paused"); return }
+        if (privacyProxyConfigured) { sendTdlibParameters(); return }
         if (!privacyProxyRequestPending) configureTorProxy()
     }
 
@@ -518,20 +395,8 @@ class TdlibTelegramRepository(
             .put("@type", "proxy")
             .put("server", TorSupport.DEFAULT_SOCKS_HOST)
             .put("port", TorSupport.DEFAULT_SOCKS_PORT)
-            .put(
-                "type",
-                JSONObject()
-                    .put("@type", "proxyTypeSocks5")
-                    .put("username", "")
-                    .put("password", "")
-            )
-        send(
-            JSONObject()
-                .put("@type", "addProxy")
-                .put("proxy", proxy)
-                .put("enable", true)
-                .put("@extra", TOR_PROXY_EXTRA)
-        )
+            .put("type", JSONObject().put("@type", "proxyTypeSocks5").put("username", "").put("password", ""))
+        send(JSONObject().put("@type", "addProxy").put("proxy", proxy).put("enable", true).put("@extra", TOR_PROXY_EXTRA))
     }
 
     private fun handleConnectionState(stateJson: JSONObject?) {
@@ -550,29 +415,28 @@ class TdlibTelegramRepository(
         if (!isConfigured || !privacyProxyConfigured) return
         val databaseKey = runCatching { TdlibDatabaseKeyStore.getOrCreateBase64Key(appContext) }
             .onFailure { setError("Local database security setup failed: ${it.message ?: it.javaClass.simpleName}") }
-            .getOrNull()
-            ?: return
-
+            .getOrNull() ?: return
         waitingForParameters = false
         val dbDir = appContext.filesDir.resolve("tdlib/database").apply { mkdirs() }.absolutePath
         val filesDir = appContext.filesDir.resolve("tdlib/files").apply { mkdirs() }.absolutePath
-        val request = JSONObject()
-            .put("@type", "setTdlibParameters")
-            .put("use_test_dc", false)
-            .put("database_directory", dbDir)
-            .put("files_directory", filesDir)
-            .put("database_encryption_key", databaseKey)
-            .put("use_file_database", true)
-            .put("use_chat_info_database", true)
-            .put("use_message_database", true)
-            .put("use_secret_chats", true)
-            .put("api_id", apiId)
-            .put("api_hash", apiHash)
-            .put("system_language_code", Locale.getDefault().toLanguageTag())
-            .put("device_model", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
-            .put("system_version", Build.VERSION.RELEASE ?: "Android")
-            .put("application_version", BuildConfig.VERSION_NAME)
-        send(request)
+        send(
+            JSONObject()
+                .put("@type", "setTdlibParameters")
+                .put("use_test_dc", false)
+                .put("database_directory", dbDir)
+                .put("files_directory", filesDir)
+                .put("database_encryption_key", databaseKey)
+                .put("use_file_database", true)
+                .put("use_chat_info_database", true)
+                .put("use_message_database", true)
+                .put("use_secret_chats", true)
+                .put("api_id", apiId)
+                .put("api_hash", apiHash)
+                .put("system_language_code", Locale.getDefault().toLanguageTag())
+                .put("device_model", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+                .put("system_version", Build.VERSION.RELEASE ?: "Android")
+                .put("application_version", BuildConfig.VERSION_NAME)
+        )
     }
 
     private fun send(request: JSONObject) {
@@ -584,22 +448,32 @@ class TdlibTelegramRepository(
     private fun upsertChat(chat: JSONObject) {
         val id = chat.optLong("id")
         if (id == 0L) return
+        val photo = chat.optJSONObject("photo")?.optJSONObject("small")
         val summary = TelegramChatSummary(
             id = id,
             title = chat.optString("title", "Telegram chat"),
             preview = previewFor(chat.optJSONObject("last_message")),
             unreadCount = chat.optInt("unread_count"),
             order = chat.optJSONArray("positions")?.optJSONObject(0)?.optLong("order") ?: 0L,
-            kind = kindFor(chat.optJSONObject("type"))
+            kind = kindFor(chat.optJSONObject("type")),
+            photoFileId = fileId(photo),
+            photoPath = filePath(photo)
         )
         synchronized(chats) { chats[id] = summary }
         publishChats()
     }
 
     private fun updateTitle(chatId: Long, title: String) {
+        synchronized(chats) { val current = chats[chatId] ?: return; chats[chatId] = current.copy(title = title) }
+        publishChats()
+    }
+
+    private fun updateChatPhoto(update: JSONObject) {
+        val chatId = update.optLong("chat_id")
+        val file = update.optJSONObject("photo")?.optJSONObject("small")
         synchronized(chats) {
             val current = chats[chatId] ?: return
-            chats[chatId] = current.copy(title = title)
+            chats[chatId] = current.copy(photoFileId = fileId(file), photoPath = filePath(file))
         }
         publishChats()
     }
@@ -607,10 +481,7 @@ class TdlibTelegramRepository(
     private fun updatePosition(update: JSONObject) {
         val chatId = update.optLong("chat_id")
         val position = update.optJSONObject("position") ?: return
-        synchronized(chats) {
-            val current = chats[chatId] ?: return
-            chats[chatId] = current.copy(order = position.optLong("order"))
-        }
+        synchronized(chats) { val current = chats[chatId] ?: return; chats[chatId] = current.copy(order = position.optLong("order")) }
         publishChats()
     }
 
@@ -625,17 +496,49 @@ class TdlibTelegramRepository(
     }
 
     private fun updateUnread(chatId: Long, unread: Int) {
-        synchronized(chats) {
-            val current = chats[chatId] ?: return
-            chats[chatId] = current.copy(unreadCount = unread)
-        }
+        synchronized(chats) { val current = chats[chatId] ?: return; chats[chatId] = current.copy(unreadCount = unread) }
         publishChats()
     }
 
-    private fun publishChats() {
-        val ordered = synchronized(chats) {
-            chats.values.sortedWith(compareByDescending<TelegramChatSummary> { it.order }.thenByDescending { it.id })
+    private fun updateFile(file: JSONObject) {
+        val id = file.optInt("id")
+        if (id <= 0) return
+        val path = filePath(file)
+        val local = file.optJSONObject("local")
+        val active = local?.optBoolean("is_downloading_active") ?: false
+        val complete = local?.optBoolean("is_downloading_completed") ?: false
+        val size = file.optLong("size").takeIf { it > 0 } ?: file.optLong("expected_size")
+        var chatChanged = false
+        synchronized(chats) {
+            chats.keys.toList().forEach { chatId ->
+                val current = chats[chatId] ?: return@forEach
+                if (current.photoFileId == id) {
+                    chats[chatId] = current.copy(photoPath = path)
+                    chatChanged = true
+                }
+            }
         }
+        var messageChanged = false
+        synchronized(activeMessages) {
+            activeMessages.keys.toList().forEach { messageId ->
+                val current = activeMessages[messageId] ?: return@forEach
+                if (current.mediaFileId == id) {
+                    activeMessages[messageId] = current.copy(
+                        mediaPath = path,
+                        mediaSize = if (size > 0) size else current.mediaSize,
+                        mediaDownloadActive = active,
+                        mediaDownloadComplete = complete
+                    )
+                    messageChanged = true
+                }
+            }
+        }
+        if (chatChanged) publishChats()
+        if (messageChanged) publishActiveMessages(loading = false)
+    }
+
+    private fun publishChats() {
+        val ordered = synchronized(chats) { chats.values.sortedWith(compareByDescending<TelegramChatSummary> { it.order }.thenByDescending { it.id }) }
         _state.value = _state.value.copy(chats = ordered)
     }
 
@@ -654,7 +557,16 @@ class TdlibTelegramRepository(
         synchronized(activeMessages) {
             val current = activeMessages[messageId] ?: return
             val (text, kind) = messageContent(newContent)
-            activeMessages[messageId] = current.copy(text = text, contentKind = kind)
+            val media = primaryMediaFile(newContent)
+            activeMessages[messageId] = current.copy(
+                text = text,
+                contentKind = kind,
+                mediaFileId = fileId(media),
+                mediaPath = filePath(media),
+                mediaSize = media?.optLong("size") ?: 0L,
+                mediaDownloadActive = media?.optJSONObject("local")?.optBoolean("is_downloading_active") ?: false,
+                mediaDownloadComplete = media?.optJSONObject("local")?.optBoolean("is_downloading_completed") ?: false
+            )
         }
         publishActiveMessages(loading = false)
     }
@@ -663,18 +575,12 @@ class TdlibTelegramRepository(
         val chatId = update.optLong("chat_id")
         if (_state.value.activeChatId != chatId) return
         val ids = update.optJSONArray("message_ids") ?: return
-        synchronized(activeMessages) {
-            for (index in 0 until ids.length()) {
-                activeMessages.remove(ids.optLong(index))
-            }
-        }
+        synchronized(activeMessages) { for (index in 0 until ids.length()) activeMessages.remove(ids.optLong(index)) }
         publishActiveMessages(loading = false)
     }
 
     private fun publishActiveMessages(loading: Boolean) {
-        val ordered = synchronized(activeMessages) {
-            activeMessages.values.sortedWith(compareBy<TelegramMessageItem> { it.date }.thenBy { it.id })
-        }
+        val ordered = synchronized(activeMessages) { activeMessages.values.sortedWith(compareBy<TelegramMessageItem> { it.date }.thenBy { it.id }) }
         _state.value = _state.value.copy(activeMessages = ordered, messagesLoading = loading)
     }
 
@@ -682,14 +588,22 @@ class TdlibTelegramRepository(
         val id = message.optLong("id")
         val chatId = message.optLong("chat_id")
         if (id == 0L || chatId == 0L) return null
-        val (text, kind) = messageContent(message.optJSONObject("content"))
+        val content = message.optJSONObject("content")
+        val (text, kind) = messageContent(content)
+        val media = primaryMediaFile(content)
+        val local = media?.optJSONObject("local")
         return TelegramMessageItem(
             id = id,
             chatId = chatId,
             text = text,
             isOutgoing = message.optBoolean("is_outgoing"),
             date = message.optInt("date"),
-            contentKind = kind
+            contentKind = kind,
+            mediaFileId = fileId(media),
+            mediaPath = filePath(media),
+            mediaSize = media?.optLong("size") ?: 0L,
+            mediaDownloadActive = local?.optBoolean("is_downloading_active") ?: false,
+            mediaDownloadComplete = local?.optBoolean("is_downloading_completed") ?: false
         )
     }
 
@@ -705,6 +619,7 @@ class TdlibTelegramRepository(
             "messageVoiceNote" -> "Voice message"
             "messageVideoNote" -> "Video message"
             "messageSticker" -> "Sticker"
+            "messagePaidMedia" -> "Paid media"
             "messageContact" -> "Contact"
             "messageLocation" -> "Location"
             "messagePoll" -> content?.optJSONObject("poll")?.optJSONObject("question")?.optString("text") ?: "Poll"
@@ -712,6 +627,40 @@ class TdlibTelegramRepository(
         }
         return text to type.ifBlank { "unknown" }
     }
+
+    private fun primaryMediaFile(content: JSONObject?): JSONObject? = when (content?.optString("@type")) {
+        "messagePhoto" -> largestPhotoFile(content.optJSONObject("photo")?.optJSONArray("sizes"))
+        "messageVideo" -> content.optJSONObject("video")?.optJSONObject("video")
+        "messageAnimation" -> content.optJSONObject("animation")?.optJSONObject("animation")
+        "messageDocument" -> content.optJSONObject("document")?.optJSONObject("document")
+        "messageAudio" -> content.optJSONObject("audio")?.optJSONObject("audio")
+        "messageVoiceNote" -> content.optJSONObject("voice_note")?.optJSONObject("voice")
+        "messageVideoNote" -> content.optJSONObject("video_note")?.optJSONObject("video")
+        "messageSticker" -> content.optJSONObject("sticker")?.optJSONObject("sticker")
+        else -> null
+    }
+
+    private fun largestPhotoFile(sizes: JSONArray?): JSONObject? {
+        if (sizes == null) return null
+        var best: JSONObject? = null
+        var bestArea = -1L
+        for (index in 0 until sizes.length()) {
+            val size = sizes.optJSONObject(index) ?: continue
+            val area = size.optLong("width") * size.optLong("height")
+            if (area >= bestArea) {
+                bestArea = area
+                best = size.optJSONObject("photo")
+            }
+        }
+        return best
+    }
+
+    private fun fileId(file: JSONObject?): Int? = file?.optInt("id")?.takeIf { it > 0 }
+
+    private fun filePath(file: JSONObject?): String? = file
+        ?.optJSONObject("local")
+        ?.optString("path")
+        ?.takeIf { it.isNotBlank() }
 
     private fun kindFor(type: JSONObject?): TelegramChatSummary.Kind = when (type?.optString("@type")) {
         "chatTypePrivate" -> TelegramChatSummary.Kind.PRIVATE
