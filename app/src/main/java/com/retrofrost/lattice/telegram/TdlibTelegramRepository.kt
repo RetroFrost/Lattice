@@ -27,6 +27,7 @@ class TdlibTelegramRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val running = AtomicBoolean(false)
     private val chats = LinkedHashMap<Long, TelegramChatSummary>()
+    private val activeMessages = LinkedHashMap<Long, TelegramMessageItem>()
 
     private var clientId: Int = 0
     private var apiId: Int = BuildConfig.TELEGRAM_API_ID
@@ -137,6 +138,72 @@ class TdlibTelegramRepository(
         )
     }
 
+    override fun openChat(chatId: Long) {
+        synchronized(activeMessages) { activeMessages.clear() }
+        _state.value = _state.value.copy(
+            activeChatId = chatId,
+            activeMessages = emptyList(),
+            messagesLoading = true,
+            lastError = null
+        )
+        send(JSONObject().put("@type", "openChat").put("chat_id", chatId))
+        send(
+            JSONObject()
+                .put("@type", "getChatHistory")
+                .put("chat_id", chatId)
+                .put("from_message_id", 0)
+                .put("offset", 0)
+                .put("limit", 50)
+                .put("only_local", false)
+                .put("@extra", "$HISTORY_EXTRA_PREFIX$chatId")
+        )
+    }
+
+    override fun closeChat() {
+        val chatId = _state.value.activeChatId ?: return
+        send(JSONObject().put("@type", "closeChat").put("chat_id", chatId))
+        synchronized(activeMessages) { activeMessages.clear() }
+        _state.value = _state.value.copy(
+            activeChatId = null,
+            activeMessages = emptyList(),
+            messagesLoading = false,
+            lastError = null
+        )
+    }
+
+    override fun sendTextMessage(chatId: Long, text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+
+        val formattedText = JSONObject()
+            .put("@type", "formattedText")
+            .put("text", trimmed)
+            .put("entities", JSONArray())
+        val linkPreviewOptions = JSONObject()
+            .put("@type", "linkPreviewOptions")
+            .put("is_disabled", true)
+            .put("url", "")
+            .put("force_small_media", false)
+            .put("force_large_media", false)
+            .put("show_above_text", false)
+        val inputContent = JSONObject()
+            .put("@type", "inputMessageText")
+            .put("text", formattedText)
+            .put("link_preview_options", linkPreviewOptions)
+            .put("clear_draft", true)
+
+        send(
+            JSONObject()
+                .put("@type", "sendMessage")
+                .put("chat_id", chatId)
+                .put("topic_id", JSONObject.NULL)
+                .put("reply_to", JSONObject.NULL)
+                .put("options", JSONObject.NULL)
+                .put("reply_markup", JSONObject.NULL)
+                .put("input_message_content", inputContent)
+        )
+    }
+
     private fun receiveLoop() {
         while (running.get()) {
             val raw = runCatching { TdLib.receive(1.0) }
@@ -153,19 +220,13 @@ class TdlibTelegramRepository(
         val responseClientId = objectJson.optInt("@client_id", clientId)
         if (responseClientId != clientId) return
 
-        if (objectJson.optString("@extra") == TOR_PROXY_EXTRA) {
-            privacyProxyRequestPending = false
-            if (objectJson.optString("@type") == "addedProxy") {
-                privacyProxyConfigured = true
-                _state.value = _state.value.copy(connectionLabel = "Tor proxy enabled — direct fallback blocked", lastError = null)
-                sendTdlibParameters()
-            } else {
-                updateAuth(
-                    TelegramAuthStage.WaitPrivacyRoute(TorSupport.isOrbotInstalled(appContext)),
-                    "Tor proxy setup failed — Telegram remains paused"
-                )
-                setError(objectJson.optString("message", "TDLib could not enable the Tor SOCKS5 proxy."))
-            }
+        val extra = objectJson.optString("@extra")
+        if (extra == TOR_PROXY_EXTRA) {
+            handleTorProxyResponse(objectJson)
+            return
+        }
+        if (extra.startsWith(HISTORY_EXTRA_PREFIX)) {
+            handleHistoryResponse(extra, objectJson)
             return
         }
 
@@ -174,10 +235,48 @@ class TdlibTelegramRepository(
             "updateConnectionState" -> handleConnectionState(objectJson.optJSONObject("state"))
             "updateNewChat" -> objectJson.optJSONObject("chat")?.let(::upsertChat)
             "updateChatTitle" -> updateTitle(objectJson.optLong("chat_id"), objectJson.optString("title"))
+            "updateChatPosition" -> updatePosition(objectJson)
             "updateChatLastMessage" -> updateLastMessage(objectJson)
             "updateChatReadInbox" -> updateUnread(objectJson.optLong("chat_id"), objectJson.optInt("unread_count"))
+            "updateNewMessage" -> objectJson.optJSONObject("message")?.let(::upsertActiveMessage)
+            "updateMessageContent" -> updateMessageContent(objectJson)
+            "updateDeleteMessages" -> removeMessages(objectJson)
             "error" -> setError(objectJson.optString("message", "Telegram returned an unknown error."))
         }
+    }
+
+    private fun handleTorProxyResponse(objectJson: JSONObject) {
+        privacyProxyRequestPending = false
+        if (objectJson.optString("@type") == "addedProxy") {
+            privacyProxyConfigured = true
+            _state.value = _state.value.copy(connectionLabel = "Tor proxy enabled — direct fallback blocked", lastError = null)
+            sendTdlibParameters()
+        } else {
+            updateAuth(
+                TelegramAuthStage.WaitPrivacyRoute(TorSupport.isOrbotInstalled(appContext)),
+                "Tor proxy setup failed — Telegram remains paused"
+            )
+            setError(objectJson.optString("message", "TDLib could not enable the Tor SOCKS5 proxy."))
+        }
+    }
+
+    private fun handleHistoryResponse(extra: String, response: JSONObject) {
+        val chatId = extra.removePrefix(HISTORY_EXTRA_PREFIX).toLongOrNull() ?: return
+        if (_state.value.activeChatId != chatId) return
+        if (response.optString("@type") == "error") {
+            _state.value = _state.value.copy(messagesLoading = false)
+            setError(response.optString("message", "Unable to load chat history."))
+            return
+        }
+
+        val items = response.optJSONArray("messages") ?: JSONArray()
+        synchronized(activeMessages) {
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                parseMessage(item)?.let { activeMessages[it.id] = it }
+            }
+        }
+        publishActiveMessages(loading = false)
     }
 
     private fun handleAuthorizationState(auth: JSONObject) {
@@ -323,6 +422,16 @@ class TdlibTelegramRepository(
         publishChats()
     }
 
+    private fun updatePosition(update: JSONObject) {
+        val chatId = update.optLong("chat_id")
+        val position = update.optJSONObject("position") ?: return
+        synchronized(chats) {
+            val current = chats[chatId] ?: return
+            chats[chatId] = current.copy(order = position.optLong("order"))
+        }
+        publishChats()
+    }
+
     private fun updateLastMessage(update: JSONObject) {
         val chatId = update.optLong("chat_id")
         synchronized(chats) {
@@ -348,18 +457,64 @@ class TdlibTelegramRepository(
         _state.value = _state.value.copy(chats = ordered)
     }
 
-    private fun kindFor(type: JSONObject?): TelegramChatSummary.Kind = when (type?.optString("@type")) {
-        "chatTypePrivate" -> TelegramChatSummary.Kind.PRIVATE
-        "chatTypeBasicGroup" -> TelegramChatSummary.Kind.GROUP
-        "chatTypeSupergroup" -> TelegramChatSummary.Kind.CHANNEL_OR_SUPERGROUP
-        "chatTypeSecret" -> TelegramChatSummary.Kind.SECRET
-        else -> TelegramChatSummary.Kind.UNKNOWN
+    private fun upsertActiveMessage(message: JSONObject) {
+        val parsed = parseMessage(message) ?: return
+        if (_state.value.activeChatId != parsed.chatId) return
+        synchronized(activeMessages) { activeMessages[parsed.id] = parsed }
+        publishActiveMessages(loading = false)
     }
 
-    private fun previewFor(message: JSONObject?): String {
-        val content = message?.optJSONObject("content") ?: return ""
-        return when (content.optString("@type")) {
-            "messageText" -> content.optJSONObject("text")?.optString("text").orEmpty()
+    private fun updateMessageContent(update: JSONObject) {
+        val chatId = update.optLong("chat_id")
+        val messageId = update.optLong("message_id")
+        if (_state.value.activeChatId != chatId) return
+        val newContent = update.optJSONObject("new_content") ?: return
+        synchronized(activeMessages) {
+            val current = activeMessages[messageId] ?: return
+            val (text, kind) = messageContent(newContent)
+            activeMessages[messageId] = current.copy(text = text, contentKind = kind)
+        }
+        publishActiveMessages(loading = false)
+    }
+
+    private fun removeMessages(update: JSONObject) {
+        val chatId = update.optLong("chat_id")
+        if (_state.value.activeChatId != chatId) return
+        val ids = update.optJSONArray("message_ids") ?: return
+        synchronized(activeMessages) {
+            for (index in 0 until ids.length()) {
+                activeMessages.remove(ids.optLong(index))
+            }
+        }
+        publishActiveMessages(loading = false)
+    }
+
+    private fun publishActiveMessages(loading: Boolean) {
+        val ordered = synchronized(activeMessages) {
+            activeMessages.values.sortedWith(compareBy<TelegramMessageItem> { it.date }.thenBy { it.id })
+        }
+        _state.value = _state.value.copy(activeMessages = ordered, messagesLoading = loading)
+    }
+
+    private fun parseMessage(message: JSONObject): TelegramMessageItem? {
+        val id = message.optLong("id")
+        val chatId = message.optLong("chat_id")
+        if (id == 0L || chatId == 0L) return null
+        val (text, kind) = messageContent(message.optJSONObject("content"))
+        return TelegramMessageItem(
+            id = id,
+            chatId = chatId,
+            text = text,
+            isOutgoing = message.optBoolean("is_outgoing"),
+            date = message.optInt("date"),
+            contentKind = kind
+        )
+    }
+
+    private fun messageContent(content: JSONObject?): Pair<String, String> {
+        val type = content?.optString("@type").orEmpty()
+        val text = when (type) {
+            "messageText" -> content?.optJSONObject("text")?.optString("text").orEmpty()
             "messagePhoto" -> caption(content, "Photo")
             "messageVideo" -> caption(content, "Video")
             "messageAnimation" -> caption(content, "GIF")
@@ -370,12 +525,24 @@ class TdlibTelegramRepository(
             "messageSticker" -> "Sticker"
             "messageContact" -> "Contact"
             "messageLocation" -> "Location"
+            "messagePoll" -> content?.optJSONObject("poll")?.optJSONObject("question")?.optString("text") ?: "Poll"
             else -> "Telegram message"
         }
+        return text to type.ifBlank { "unknown" }
     }
 
-    private fun caption(content: JSONObject, fallback: String): String {
-        val text = content.optJSONObject("caption")?.optString("text").orEmpty()
+    private fun kindFor(type: JSONObject?): TelegramChatSummary.Kind = when (type?.optString("@type")) {
+        "chatTypePrivate" -> TelegramChatSummary.Kind.PRIVATE
+        "chatTypeBasicGroup" -> TelegramChatSummary.Kind.GROUP
+        "chatTypeSupergroup" -> TelegramChatSummary.Kind.CHANNEL_OR_SUPERGROUP
+        "chatTypeSecret" -> TelegramChatSummary.Kind.SECRET
+        else -> TelegramChatSummary.Kind.UNKNOWN
+    }
+
+    private fun previewFor(message: JSONObject?): String = messageContent(message?.optJSONObject("content")).first
+
+    private fun caption(content: JSONObject?, fallback: String): String {
+        val text = content?.optJSONObject("caption")?.optString("text").orEmpty()
         return text.ifBlank { fallback }
     }
 
@@ -389,5 +556,6 @@ class TdlibTelegramRepository(
 
     private companion object {
         const val TOR_PROXY_EXTRA = "lattice_tor_proxy_setup"
+        const val HISTORY_EXTRA_PREFIX = "lattice_history:"
     }
 }
