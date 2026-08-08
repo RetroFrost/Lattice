@@ -56,6 +56,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("com.google.zxing:core:3.5.4")
 
     // TDLib 1.8.62 packaged for Android. The app talks to the official TDLib JSON API.
     implementation("io.github.xephosbot:tdlib-kmp-android:1.8.62")
