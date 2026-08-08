@@ -1,0 +1,78 @@
+name: Lattice Telegram Android
+
+on:
+  push:
+    branches: [ lattice-telegram-base ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      REAL_TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      REAL_TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+    steps:
+      - name: Checkout Telegram-based Lattice with native submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Telegram Android toolchain
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.10.2.4988404"
+
+      - name: Select Lattice API credentials
+        shell: bash
+        run: |
+          if [[ -n "$REAL_TELEGRAM_API_ID" && -n "$REAL_TELEGRAM_API_HASH" ]]; then
+            echo "TELEGRAM_API_ID=$REAL_TELEGRAM_API_ID" >> "$GITHUB_ENV"
+            echo "TELEGRAM_API_HASH=$REAL_TELEGRAM_API_HASH" >> "$GITHUB_ENV"
+            echo "LATTICE_AUTH_BUILD=true" >> "$GITHUB_ENV"
+            echo "Using repository Lattice Telegram API credentials."
+          else
+            # These are intentionally invalid and exist only so Java/native compilation can be validated.
+            echo "TELEGRAM_API_ID=100000" >> "$GITHUB_ENV"
+            echo "TELEGRAM_API_HASH=00000000000000000000000000000000" >> "$GITHUB_ENV"
+            echo "LATTICE_AUTH_BUILD=false" >> "$GITHUB_ENV"
+            echo "No Telegram API secrets found: this run is compile validation only."
+          fi
+
+      - name: Build real Telegram-based Lattice APK
+        run: ./gradlew :TMessagesProj_App:assembleAfatDebug --stacktrace --no-daemon
+
+      - name: Collect APK and capability marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          apk="$(find TMessagesProj_App/build/outputs/apk -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          cp "$apk" dist/Lattice-Telegram-0.4.0-alpha.1.apk
+          if [[ "$LATTICE_AUTH_BUILD" == "true" ]]; then
+            printf 'AUTH_CAPABLE=true\nBase=official Telegram Android\n' > dist/BUILD_CAPABILITY.txt
+          else
+            printf 'AUTH_CAPABLE=false\nReason=TELEGRAM_API_ID and TELEGRAM_API_HASH repository secrets are not configured.\nBase=official Telegram Android\n' > dist/BUILD_CAPABILITY.txt
+          fi
+          sha256sum dist/Lattice-Telegram-0.4.0-alpha.1.apk | tee dist/SHA256SUMS.txt
+
+      - name: Upload Telegram-based Lattice build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lattice-Telegram-0.4.0-alpha.1
+          path: dist/
+          if-no-files-found: error
