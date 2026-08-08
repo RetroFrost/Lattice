@@ -45,9 +45,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.retrofrost.lattice.model.LatticeSettings
+import com.retrofrost.lattice.model.LatticeSettingsStore
+import com.retrofrost.lattice.privacy.ContentFilterEngine
 import com.retrofrost.lattice.telegram.TdlibTelegramRepository
 import com.retrofrost.lattice.telegram.TelegramAuthStage
 import com.retrofrost.lattice.telegram.TelegramChatSummary
+import com.retrofrost.lattice.telegram.TelegramMessageItem
 import com.retrofrost.lattice.telegram.TelegramUiState
 
 private data class HomeTab(val title: String, val icon: ImageVector)
@@ -62,6 +65,7 @@ fun LatticeApp(incomingLink: String?) {
     }
     val repository = remember { TdlibTelegramRepository(context.applicationContext) }
     val telegramState by repository.state.collectAsStateWithLifecycle()
+    val settingsStore = remember { LatticeSettingsStore(context.applicationContext) }
 
     DisposableEffect(repository) {
         repository.start()
@@ -75,7 +79,7 @@ fun LatticeApp(incomingLink: String?) {
     }
 
     MaterialTheme(colorScheme = colors) {
-        var settings by remember { mutableStateOf(LatticeSettings()) }
+        var settings by remember { mutableStateOf(settingsStore.load()) }
         var showSettings by remember { mutableStateOf(false) }
         val activeChatId = telegramState.activeChatId
 
@@ -84,7 +88,10 @@ fun LatticeApp(incomingLink: String?) {
         } else if (showSettings) {
             SettingsScreen(
                 settings = settings,
-                onSettingsChange = { settings = it },
+                onSettingsChange = { updated ->
+                    settings = updated
+                    settingsStore.save(updated)
+                },
                 onBack = { showSettings = false }
             )
         } else if (activeChatId != null) {
@@ -92,12 +99,14 @@ fun LatticeApp(incomingLink: String?) {
             ChatScreen(
                 title = chat?.title ?: "Telegram chat",
                 state = telegramState,
+                settings = settings,
                 onBack = repository::closeChat,
                 onSend = { repository.sendTextMessage(activeChatId, it) }
             )
         } else {
             HomeScreen(
                 state = telegramState,
+                settings = settings,
                 onOpenSettings = { showSettings = true },
                 onRefresh = repository::refreshChats,
                 onOpenChat = repository::openChat,
@@ -112,6 +121,7 @@ fun LatticeApp(incomingLink: String?) {
 @Composable
 private fun HomeScreen(
     state: TelegramUiState,
+    settings: LatticeSettings,
     onOpenSettings: () -> Unit,
     onRefresh: () -> Unit,
     onOpenChat: (Long) -> Unit,
@@ -173,7 +183,8 @@ private fun HomeScreen(
                         Column(modifier = Modifier.padding(start = 12.dp)) {
                             Text("Maximum Privacy", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "TDLib is connected through the privacy route. Optional Telegram features stay disabled unless you enable them.",
+                                if (settings.dndEnabled) "Do Not Disturb active • privacy route enforced"
+                                else "Privacy route enforced • optional data disabled",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
@@ -190,12 +201,8 @@ private fun HomeScreen(
                         ) {
                             Text("Telegram invite", style = MaterialTheme.typography.titleLarge)
                             Text(invite.title, style = MaterialTheme.typography.titleMedium)
-                            if (invite.memberCount > 0) {
-                                Text("${invite.memberCount} members", style = MaterialTheme.typography.bodyMedium)
-                            }
-                            if (invite.description.isNotBlank()) {
-                                Text(invite.description, style = MaterialTheme.typography.bodyMedium)
-                            }
+                            if (invite.memberCount > 0) Text("${invite.memberCount} members")
+                            if (invite.description.isNotBlank()) Text(invite.description)
                             if (invite.requiresSubscription) {
                                 Text("This invite requires a Telegram subscription payment.", style = MaterialTheme.typography.bodySmall)
                             } else if (invite.createsJoinRequest) {
@@ -215,10 +222,7 @@ private fun HomeScreen(
                 }
             }
 
-            state.lastError?.let { error ->
-                item { Text(error, color = MaterialTheme.colorScheme.error) }
-            }
-
+            state.lastError?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
             item { Text(title, style = MaterialTheme.typography.headlineSmall) }
 
             if (title == "Calls") {
@@ -226,7 +230,7 @@ private fun HomeScreen(
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Calls", style = MaterialTheme.typography.titleMedium)
-                            Text("Call history and relay-only calling are the next TDLib layer.")
+                            Text("P2P is disabled by Maximum Privacy; relay-only call support is still being wired.")
                         }
                     }
                 }
@@ -234,7 +238,7 @@ private fun HomeScreen(
                 item { Text("No chats loaded in this section yet.") }
             } else {
                 items(visibleChats, key = { it.id }) { chat ->
-                    ChatRow(chat = chat, onClick = { onOpenChat(chat.id) })
+                    ChatRow(chat = chat, settings = settings, onClick = { onOpenChat(chat.id) })
                 }
             }
         }
@@ -242,14 +246,20 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun ChatRow(chat: TelegramChatSummary, onClick: () -> Unit) {
+private fun ChatRow(chat: TelegramChatSummary, settings: LatticeSettings, onClick: () -> Unit) {
+    val previewDecision = ContentFilterEngine.evaluate(
+        TelegramMessageItem(-1L, chat.id, chat.preview, false, 0, "preview"),
+        settings
+    )
+    val hideBadge = settings.dndEnabled && settings.dndHideUnreadBadges
+
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(chat.title, style = MaterialTheme.typography.titleMedium)
             if (chat.preview.isNotBlank()) {
-                Text(chat.preview, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                Text(previewDecision.displayText, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
             }
-            if (chat.unreadCount > 0) {
+            if (chat.unreadCount > 0 && !hideBadge) {
                 Text("${chat.unreadCount} unread", style = MaterialTheme.typography.labelMedium)
             }
         }
