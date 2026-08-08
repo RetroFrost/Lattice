@@ -23,7 +23,9 @@ data class TelegramChatSummary(
     val preview: String,
     val unreadCount: Int,
     val order: Long,
-    val kind: Kind
+    val kind: Kind,
+    val photoFileId: Int? = null,
+    val photoPath: String? = null
 ) {
     enum class Kind { PRIVATE, GROUP, CHANNEL_OR_SUPERGROUP, SECRET, UNKNOWN }
 }
@@ -34,7 +36,12 @@ data class TelegramMessageItem(
     val text: String,
     val isOutgoing: Boolean,
     val date: Int,
-    val contentKind: String
+    val contentKind: String,
+    val mediaFileId: Int? = null,
+    val mediaPath: String? = null,
+    val mediaSize: Long = 0L,
+    val mediaDownloadActive: Boolean = false,
+    val mediaDownloadComplete: Boolean = false
 )
 
 data class TelegramInvitePreview(
