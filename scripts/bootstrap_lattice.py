@@ -1,0 +1,149 @@
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    text = p.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected one match, got {count}: {old[:100]!r}")
+    p.write_text(text.replace(old, new, 1))
+
+
+# Build-time Lattice Telegram API credentials. Official Telegram credentials are never reused.
+replace_once(
+    "TMessagesProj/build.gradle",
+    "import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform\n\napply plugin: 'com.android.library'",
+    """import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
+
+// Lattice is an unofficial Telegram client. Supply its own API credentials at build time.
+def rawLatticeApiId = (project.findProperty('TELEGRAM_API_ID') ?: System.getenv('TELEGRAM_API_ID') ?: '0').toString()
+def latticeApiId = rawLatticeApiId.matches('[0-9]+') ? rawLatticeApiId : '0'
+def latticeApiHash = (project.findProperty('TELEGRAM_API_HASH') ?: System.getenv('TELEGRAM_API_HASH') ?: '').toString()
+def escapedLatticeApiHash = latticeApiHash.replace('\\', '\\\\').replace('"', '\\"')
+
+apply plugin: 'com.android.library'""",
+)
+replace_once(
+    "TMessagesProj/build.gradle",
+    """    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 35
+""",
+    """    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 35
+
+        buildConfigField "int", "LATTICE_API_ID", latticeApiId
+        buildConfigField "String", "LATTICE_API_HASH", "\\\"${escapedLatticeApiHash}\\\""
+""",
+)
+
+# Remove official-only service identity from the fork.
+buildvars = Path("TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java")
+text = buildvars.read_text()
+pairs = {
+    "public static boolean USE_CLOUD_STRINGS = true;": "public static boolean USE_CLOUD_STRINGS = false;",
+    "public static boolean CHECK_UPDATES = true;": "public static boolean CHECK_UPDATES = false;",
+    "public static int APP_ID = 4;": "public static int APP_ID = BuildConfig.LATTICE_API_ID;",
+    'public static String APP_HASH = "014b35b6184100b085b0d0572f9b5103";': "public static String APP_HASH = BuildConfig.LATTICE_API_HASH;",
+    'public static String SAFETYNET_KEY = "AIzaSyDqt8P-7F7CPCseMkOiVRgb1LY8RN1bvH8";': 'public static String SAFETYNET_KEY = "";',
+    'public static String PLAYSTORE_APP_URL = "https://play.google.com/store/apps/details?id=org.telegram.messenger";': 'public static String PLAYSTORE_APP_URL = "";',
+    'public static String HUAWEI_STORE_URL = "https://appgallery.huawei.com/app/C101184875";': 'public static String HUAWEI_STORE_URL = "";',
+    'public static String GOOGLE_AUTH_CLIENT_ID = "760348033671-81kmi3pi84p11ub8hp9a1funsv0rn2p9.apps.googleusercontent.com";': 'public static String GOOGLE_AUTH_CLIENT_ID = "";',
+    'public static String HUAWEI_APP_ID = "101184875";': 'public static String HUAWEI_APP_ID = "";',
+    "public static boolean IS_BILLING_UNAVAILABLE = false;": "public static boolean IS_BILLING_UNAVAILABLE = true;",
+    "public static boolean SUPPORTS_PASSKEYS = true;": "public static boolean SUPPORTS_PASSKEYS = false;",
+    '"org.telegram.messenger.beta".equals(ApplicationLoader.applicationContext.getPackageName())': '"com.retrofrost.lattice.beta".equals(ApplicationLoader.applicationContext.getPackageName())',
+}
+for old, new in pairs.items():
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"BuildVars.java: expected one match for {old!r}, got {count}")
+    text = text.replace(old, new, 1)
+buildvars.write_text(text)
+
+# Brand only the app itself; references to the Telegram service remain truthful.
+replace_once(
+    "TMessagesProj/src/main/res/values/strings.xml",
+    '<string name="AppName">Telegram</string>\n    <string name="AppNameBeta">Telegram Beta</string>',
+    '<string name="AppName">Lattice</string>\n    <string name="AppNameBeta">Lattice Beta</string>',
+)
+
+# Files-only mode: selected groups/supergroups/channels open Telegram's native Files tab.
+replace_once(
+    "TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java",
+    "import org.telegram.messenger.LocaleController;\n",
+    "import org.telegram.messenger.LocaleController;\nimport org.telegram.messenger.LatticeChatPreferences;\n",
+)
+replace_once(
+    "TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java",
+    "                    } else if (chat != null && (chat.monoforum || chat.forum) && topicId == 0) {\n",
+    """                    } else if (chat != null && LatticeChatPreferences.isFilesOnly(dialogId)) {
+                        Bundle mediaArgs = new Bundle();
+                        mediaArgs.putLong("dialog_id", dialogId);
+                        mediaArgs.putInt("type", MediaActivity.TYPE_MEDIA);
+                        mediaArgs.putInt("start_from", SharedMediaLayout.TAB_FILES);
+                        if (sharedMediaPreloader == null) {
+                            sharedMediaPreloader = new SharedMediaLayout.SharedMediaPreloader(this);
+                        }
+                        presentFragment(new MediaActivity(mediaArgs, sharedMediaPreloader));
+                    } else if (chat != null && (chat.monoforum || chat.forum) && topicId == 0) {
+""",
+)
+
+replace_once(
+    "TMessagesProj/src/main/java/org/telegram/ui/Components/MediaActivity.java",
+    "import org.telegram.messenger.LocaleController;\n",
+    "import org.telegram.messenger.LocaleController;\nimport org.telegram.messenger.LatticeChatPreferences;\n",
+)
+replace_once(
+    "TMessagesProj/src/main/java/org/telegram/ui/Components/MediaActivity.java",
+    """    public static final int TYPE_STORIES_SEARCH = 3;
+
+    private int type;
+""",
+    """    public static final int TYPE_STORIES_SEARCH = 3;
+    private static final int LATTICE_FILES_ONLY_ITEM = 42001;
+
+    private int type;
+    private ActionBarMenuItem latticeFilesOnlyItem;
+""",
+)
+replace_once(
+    "TMessagesProj/src/main/java/org/telegram/ui/Components/MediaActivity.java",
+    """                } else if (id == 10) {
+                    sharedMediaLayout.showMediaCalendar(sharedMediaLayout.getClosestTab(), false);
+""",
+    """                } else if (id == LATTICE_FILES_ONLY_ITEM) {
+                    boolean enabled = LatticeChatPreferences.toggleFilesOnly(dialogId);
+                    if (latticeFilesOnlyItem != null) {
+                        latticeFilesOnlyItem.setAlpha(enabled ? 1f : .55f);
+                    }
+                    if (enabled && sharedMediaLayout != null) {
+                        sharedMediaLayout.scrollToPage(SharedMediaLayout.TAB_FILES);
+                    }
+                    BulletinFactory.of(MediaActivity.this).createSimpleBulletin(
+                        R.raw.contact_check,
+                        enabled ? "Files-only mode enabled" : "Files-only mode disabled"
+                    ).show();
+                } else if (id == 10) {
+                    sharedMediaLayout.showMediaCalendar(sharedMediaLayout.getClosestTab(), false);
+""",
+)
+replace_once(
+    "TMessagesProj/src/main/java/org/telegram/ui/Components/MediaActivity.java",
+    """        ActionBarMenu menu2 = actionBar.createMenu();
+        if (type == TYPE_STORIES || type == TYPE_ARCHIVED_CHANNEL_STORIES) {
+""",
+    """        ActionBarMenu menu2 = actionBar.createMenu();
+        if (type == TYPE_MEDIA && dialogId < 0) {
+            latticeFilesOnlyItem = menu2.addItem(LATTICE_FILES_ONLY_ITEM, R.drawable.msg_file, getResourceProvider());
+            latticeFilesOnlyItem.setContentDescription("Toggle files-only mode for this chat");
+            latticeFilesOnlyItem.setAlpha(LatticeChatPreferences.isFilesOnly(dialogId) ? 1f : .55f);
+        }
+        if (type == TYPE_STORIES || type == TYPE_ARCHIVED_CHANNEL_STORIES) {
+""",
+)
+
+print("Lattice fork patches applied successfully")
