@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Message
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Update
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -24,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -31,6 +33,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +68,12 @@ fun LatticeApp(incomingLink: String?) {
         onDispose { repository.close() }
     }
 
+    LaunchedEffect(incomingLink, telegramState.authStage) {
+        if (telegramState.authStage == TelegramAuthStage.Ready && !incomingLink.isNullOrBlank()) {
+            repository.openTelegramLink(incomingLink)
+        }
+    }
+
     MaterialTheme(colorScheme = colors) {
         var settings by remember { mutableStateOf(LatticeSettings()) }
         var showSettings by remember { mutableStateOf(false) }
@@ -88,11 +97,12 @@ fun LatticeApp(incomingLink: String?) {
             )
         } else {
             HomeScreen(
-                incomingLink = incomingLink,
                 state = telegramState,
                 onOpenSettings = { showSettings = true },
                 onRefresh = repository::refreshChats,
-                onOpenChat = repository::openChat
+                onOpenChat = repository::openChat,
+                onJoinInvite = repository::joinPendingInvite,
+                onDismissInvite = repository::dismissPendingInvite
             )
         }
     }
@@ -101,11 +111,12 @@ fun LatticeApp(incomingLink: String?) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(
-    incomingLink: String?,
     state: TelegramUiState,
     onOpenSettings: () -> Unit,
     onRefresh: () -> Unit,
-    onOpenChat: (Long) -> Unit
+    onOpenChat: (Long) -> Unit,
+    onJoinInvite: () -> Unit,
+    onDismissInvite: () -> Unit
 ) {
     val tabs = listOf(
         HomeTab("Chats", Icons.Outlined.Message),
@@ -170,12 +181,35 @@ private fun HomeScreen(
                 }
             }
 
-            if (!incomingLink.isNullOrBlank()) {
+            state.pendingInvite?.let { invite ->
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Telegram link received", style = MaterialTheme.typography.titleMedium)
-                            Text(incomingLink, style = MaterialTheme.typography.bodySmall)
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Telegram invite", style = MaterialTheme.typography.titleLarge)
+                            Text(invite.title, style = MaterialTheme.typography.titleMedium)
+                            if (invite.memberCount > 0) {
+                                Text("${invite.memberCount} members", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (invite.description.isNotBlank()) {
+                                Text(invite.description, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (invite.requiresSubscription) {
+                                Text("This invite requires a Telegram subscription payment.", style = MaterialTheme.typography.bodySmall)
+                            } else if (invite.createsJoinRequest) {
+                                Text("Joining sends a request to the chat administrators.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(onClick = onDismissInvite) { Text("Cancel") }
+                                Button(onClick = onJoinInvite, enabled = !invite.requiresSubscription) {
+                                    Text(if (invite.createsJoinRequest) "Request to join" else "Join")
+                                }
+                            }
                         }
                     }
                 }
