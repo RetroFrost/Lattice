@@ -14,8 +14,8 @@ android {
         applicationId = "com.retrofrost.lattice"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-alpha.1"
+        versionCode = 3
+        versionName = "0.3.0-alpha.1"
 
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId.toString())
         buildConfigField("String", "TELEGRAM_API_HASH", "\"${telegramApiHash.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
