@@ -5,10 +5,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +17,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Message
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Update
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -26,12 +25,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,7 +43,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.retrofrost.lattice.model.LatticeSettings
+import com.retrofrost.lattice.telegram.TdlibTelegramRepository
+import com.retrofrost.lattice.telegram.TelegramAuthStage
+import com.retrofrost.lattice.telegram.TelegramChatSummary
+import com.retrofrost.lattice.telegram.TelegramUiState
 
 private data class HomeTab(val title: String, val icon: ImageVector)
 
@@ -53,21 +60,49 @@ fun LatticeApp(incomingLink: String?) {
     } else {
         darkColorScheme()
     }
+    val repository = remember { TdlibTelegramRepository(context.applicationContext) }
+    val telegramState by repository.state.collectAsStateWithLifecycle()
+
+    DisposableEffect(repository) {
+        repository.start()
+        onDispose { repository.close() }
+    }
+
+    LaunchedEffect(incomingLink, telegramState.authStage) {
+        if (telegramState.authStage == TelegramAuthStage.Ready && !incomingLink.isNullOrBlank()) {
+            repository.openTelegramLink(incomingLink)
+        }
+    }
 
     MaterialTheme(colorScheme = colors) {
         var settings by remember { mutableStateOf(LatticeSettings()) }
         var showSettings by remember { mutableStateOf(false) }
+        val activeChatId = telegramState.activeChatId
 
-        if (showSettings) {
+        if (telegramState.authStage != TelegramAuthStage.Ready) {
+            AuthScreen(state = telegramState, repository = repository)
+        } else if (showSettings) {
             SettingsScreen(
                 settings = settings,
                 onSettingsChange = { settings = it },
                 onBack = { showSettings = false }
             )
+        } else if (activeChatId != null) {
+            val chat = telegramState.chats.firstOrNull { it.id == activeChatId }
+            ChatScreen(
+                title = chat?.title ?: "Telegram chat",
+                state = telegramState,
+                onBack = repository::closeChat,
+                onSend = { repository.sendTextMessage(activeChatId, it) }
+            )
         } else {
             HomeScreen(
-                incomingLink = incomingLink,
-                onOpenSettings = { showSettings = true }
+                state = telegramState,
+                onOpenSettings = { showSettings = true },
+                onRefresh = repository::refreshChats,
+                onOpenChat = repository::openChat,
+                onJoinInvite = repository::joinPendingInvite,
+                onDismissInvite = repository::dismissPendingInvite
             )
         }
     }
@@ -75,7 +110,14 @@ fun LatticeApp(incomingLink: String?) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScreen(incomingLink: String?, onOpenSettings: () -> Unit) {
+private fun HomeScreen(
+    state: TelegramUiState,
+    onOpenSettings: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenChat: (Long) -> Unit,
+    onJoinInvite: () -> Unit,
+    onDismissInvite: () -> Unit
+) {
     val tabs = listOf(
         HomeTab("Chats", Icons.Outlined.Message),
         HomeTab("Updates", Icons.Outlined.Update),
@@ -87,8 +129,16 @@ private fun HomeScreen(incomingLink: String?, onOpenSettings: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Lattice") },
+                title = {
+                    Column {
+                        Text("Lattice")
+                        Text(state.connectionLabel, style = MaterialTheme.typography.labelSmall)
+                    }
+                },
                 actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Outlined.Update, contentDescription = "Refresh chats")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                     }
@@ -109,6 +159,8 @@ private fun HomeScreen(incomingLink: String?, onOpenSettings: () -> Unit) {
         }
     ) { padding ->
         val title = tabs[selected].title
+        val visibleChats = chatsForTab(title, state.chats)
+
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
@@ -121,7 +173,7 @@ private fun HomeScreen(incomingLink: String?, onOpenSettings: () -> Unit) {
                         Column(modifier = Modifier.padding(start = 12.dp)) {
                             Text("Maximum Privacy", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Optional Telegram data is disabled. Direct-IP fallback is blocked when privacy routing is enabled.",
+                                "TDLib is connected through the privacy route. Optional Telegram features stay disabled unless you enable them.",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
@@ -129,48 +181,86 @@ private fun HomeScreen(incomingLink: String?, onOpenSettings: () -> Unit) {
                 }
             }
 
-            if (!incomingLink.isNullOrBlank()) {
+            state.pendingInvite?.let { invite ->
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Telegram link received", style = MaterialTheme.typography.titleMedium)
-                            Text(incomingLink, style = MaterialTheme.typography.bodySmall)
-                            Spacer(Modifier.height(8.dp))
-                            Text("It will open through TDLib once the Telegram transport is connected.")
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Telegram invite", style = MaterialTheme.typography.titleLarge)
+                            Text(invite.title, style = MaterialTheme.typography.titleMedium)
+                            if (invite.memberCount > 0) {
+                                Text("${invite.memberCount} members", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (invite.description.isNotBlank()) {
+                                Text(invite.description, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (invite.requiresSubscription) {
+                                Text("This invite requires a Telegram subscription payment.", style = MaterialTheme.typography.bodySmall)
+                            } else if (invite.createsJoinRequest) {
+                                Text("Joining sends a request to the chat administrators.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(onClick = onDismissInvite) { Text("Cancel") }
+                                Button(onClick = onJoinInvite, enabled = !invite.requiresSubscription) {
+                                    Text(if (invite.createsJoinRequest) "Request to join" else "Join")
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            item {
-                Text(title, style = MaterialTheme.typography.headlineSmall)
+            state.lastError?.let { error ->
+                item { Text(error, color = MaterialTheme.colorScheme.error) }
             }
 
-            items(placeholderRowsFor(title)) { row ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(row.first, style = MaterialTheme.typography.titleMedium)
-                        Text(row.second, style = MaterialTheme.typography.bodyMedium)
+            item { Text(title, style = MaterialTheme.typography.headlineSmall) }
+
+            if (title == "Calls") {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Calls", style = MaterialTheme.typography.titleMedium)
+                            Text("Call history and relay-only calling are the next TDLib layer.")
+                        }
                     }
+                }
+            } else if (visibleChats.isEmpty()) {
+                item { Text("No chats loaded in this section yet.") }
+            } else {
+                items(visibleChats, key = { it.id }) { chat ->
+                    ChatRow(chat = chat, onClick = { onOpenChat(chat.id) })
                 }
             }
         }
     }
 }
 
-private fun placeholderRowsFor(tab: String): List<Pair<String, String>> = when (tab) {
-    "Chats" -> listOf(
-        "Telegram connection not configured" to "TDLib authentication will replace this bootstrap state.",
-        "Private chats" to "Cloud chats and Secret Chats will be clearly distinguished."
-    )
-    "Updates" -> listOf(
-        "Channels" to "Joined channels, posts and discussions belong here.",
-        "Paid media" to "Stars-locked previews are hidden under Maximum Privacy."
-    )
-    "Groups" -> listOf(
-        "Groups & supergroups" to "Members, replies, reactions, permissions and invite links are in scope."
-    )
-    else -> listOf(
-        "Calls" to "Peer-to-peer calls are disabled when Hide my IP is active."
-    )
+@Composable
+private fun ChatRow(chat: TelegramChatSummary, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(chat.title, style = MaterialTheme.typography.titleMedium)
+            if (chat.preview.isNotBlank()) {
+                Text(chat.preview, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+            }
+            if (chat.unreadCount > 0) {
+                Text("${chat.unreadCount} unread", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+private fun chatsForTab(tab: String, chats: List<TelegramChatSummary>): List<TelegramChatSummary> = when (tab) {
+    "Chats" -> chats
+    "Updates" -> chats.filter { it.kind == TelegramChatSummary.Kind.CHANNEL_OR_SUPERGROUP }
+    "Groups" -> chats.filter {
+        it.kind == TelegramChatSummary.Kind.GROUP || it.kind == TelegramChatSummary.Kind.CHANNEL_OR_SUPERGROUP
+    }
+    else -> emptyList()
 }

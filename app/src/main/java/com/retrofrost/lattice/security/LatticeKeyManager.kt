@@ -3,7 +3,6 @@ package com.retrofrost.lattice.security
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 
@@ -21,8 +20,8 @@ object LatticeKeyManager {
             try {
                 generateKey(strongBox = true)
                 return Backing.STRONGBOX
-            } catch (_: StrongBoxUnavailableException) {
-                // Fall through to the normal Android Keystore, normally TEE-backed.
+            } catch (_: Exception) {
+                // StrongBox is optional. Fall through to the normal Android Keystore.
             }
         }
 
