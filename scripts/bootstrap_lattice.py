@@ -146,4 +146,10 @@ replace_once(
 """,
 )
 
+# Do not inherit Telegram's official Firebase/Google Services identity.
+p = Path("TMessagesProj/build.gradle")
+text = p.read_text()
+text = text.replace("apply plugin: 'com.google.gms.google-services'\n", "")
+p.write_text(text)
+
 print("Lattice fork patches applied successfully")
