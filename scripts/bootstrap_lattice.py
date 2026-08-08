@@ -138,7 +138,7 @@ replace_once(
 """,
     """        ActionBarMenu menu2 = actionBar.createMenu();
         if (type == TYPE_MEDIA && dialogId < 0) {
-            latticeFilesOnlyItem = menu2.addItem(LATTICE_FILES_ONLY_ITEM, R.drawable.msg_file, getResourceProvider());
+            latticeFilesOnlyItem = menu2.addItem(LATTICE_FILES_ONLY_ITEM, R.drawable.msg_settings, getResourceProvider());
             latticeFilesOnlyItem.setContentDescription("Toggle files-only mode for this chat");
             latticeFilesOnlyItem.setAlpha(LatticeChatPreferences.isFilesOnly(dialogId) ? 1f : .55f);
         }

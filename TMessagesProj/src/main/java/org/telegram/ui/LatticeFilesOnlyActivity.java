@@ -177,7 +177,7 @@ public class LatticeFilesOnlyActivity extends BaseFragment {
                 view = cell;
             } else if (viewType == VIEW_SELECT) {
                 TextCell cell = new TextCell(context);
-                cell.setTextAndIcon("Select groups and channels", R.drawable.msg_file, false);
+                cell.setTextAndIcon("Select groups and channels", R.drawable.msg_settings, false);
                 cell.setColors(Theme.key_windowBackgroundWhiteBlueIcon, Theme.key_windowBackgroundWhiteBlueButton);
                 view = cell;
             } else if (viewType == VIEW_CHAT) {
