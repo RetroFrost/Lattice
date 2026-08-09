@@ -154,7 +154,7 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token": token,
-		"user": map[string]any{"id": id, "username": in.Username, "display_name": in.DisplayName},
+		"user":  map[string]any{"id": id, "username": in.Username, "display_name": in.DisplayName},
 	})
 }
 
@@ -183,7 +183,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": token,
-		"user": map[string]any{"id": id, "username": in.Username, "display_name": displayName},
+		"user":  map[string]any{"id": id, "username": in.Username, "display_name": displayName},
 	})
 }
 
@@ -433,10 +433,10 @@ func (a *App) listMessages(w http.ResponseWriter, r *http.Request) {
 func (a *App) putKeyBundle(w http.ResponseWriter, r *http.Request) {
 	c := currentUser(r)
 	var in struct {
-		IdentityKey       string   `json:"identity_key"`
-		SignedPreKey      string   `json:"signed_prekey"`
-		SignedPreKeySig   string   `json:"signed_prekey_signature"`
-		OneTimePreKeys    []string `json:"one_time_prekeys"`
+		IdentityKey     string   `json:"identity_key"`
+		SignedPreKey    string   `json:"signed_prekey"`
+		SignedPreKeySig string   `json:"signed_prekey_signature"`
+		OneTimePreKeys  []string `json:"one_time_prekeys"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -525,11 +525,11 @@ func (a *App) getKeyBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"username": username,
-		"identity_key": identityKey,
-		"signed_prekey": signedPreKey,
+		"username":                username,
+		"identity_key":            identityKey,
+		"signed_prekey":           signedPreKey,
 		"signed_prekey_signature": signature,
-		"one_time_prekey": oneTime,
+		"one_time_prekey":         oneTime,
 	})
 }
 
@@ -641,6 +641,7 @@ func (h *hub) broadcast(userIDs []string, payload any) {
 				seen[client] = true
 				clients = append(clients, client)
 			}
+		}
 	}
 	h.mu.RUnlock()
 	for _, client := range clients {
@@ -672,11 +673,6 @@ func verifyPassword(password, encoded string) bool {
 	var memory uint32
 	var iterations uint32
 	var parallelism uint8
-	var saltB64, hashB64 string
-	if _, err := fmt.Sscanf(encoded, "$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", &memory, &iterations, &parallelism, &saltB64, &hashB64); err != nil {
-		return false
-	}
-	// fmt.Sscanf with %s does not stop at '$', so parse explicitly.
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 {
 		return false
