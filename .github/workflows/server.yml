@@ -1,0 +1,131 @@
+name: Lattice Server
+
+on:
+  push:
+    branches: [ lattice-network ]
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: lattice
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: server/go.mod
+      - name: Download modules
+        run: go mod download
+      - name: Verify formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Compile and test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build server
+        run: go build -o lattice-server ./cmd/lattice-server
+      - name: Integration smoke test
+        env:
+          DATABASE_URL: postgres://lattice:lattice@127.0.0.1:5432/lattice?sslmode=disable
+          JWT_SECRET: ci-only-lattice-jwt-secret-which-is-long-enough-123456789
+          LISTEN_ADDR: 127.0.0.1:8080
+          PGPASSWORD: lattice
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y postgresql-client
+          fi
+          psql -h 127.0.0.1 -U lattice -d lattice -f migrations/001_init.sql
+          ./lattice-server >server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true; cat server.log' EXIT
+
+          python3 - <<'PY'
+          import json, time, urllib.request
+
+          base = 'http://127.0.0.1:8080'
+
+          def call(method, path, body=None, token=None):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(base + path, data=data, method=method)
+              if data is not None:
+                  req.add_header('Content-Type', 'application/json')
+              if token:
+                  req.add_header('Authorization', 'Bearer ' + token)
+              with urllib.request.urlopen(req, timeout=5) as response:
+                  return json.load(response)
+
+          for _ in range(50):
+              try:
+                  if call('GET', '/healthz')['ok']:
+                      break
+              except Exception:
+                  time.sleep(.1)
+          else:
+              raise SystemExit('server did not become healthy')
+
+          alice = call('POST', '/v1/auth/register', {
+              'username': 'alice_ci', 'password': 'correct horse battery staple', 'display_name': 'Alice'
+          })
+          bob = call('POST', '/v1/auth/register', {
+              'username': 'bob_ci', 'password': 'another correct horse battery', 'display_name': 'Bob'
+          })
+
+          alice_login = call('POST', '/v1/auth/login', {
+              'username': 'alice_ci', 'password': 'correct horse battery staple'
+          })
+          alice_token = alice_login['token']
+          bob_token = bob['token']
+
+          call('PUT', '/v1/keys', {
+              'identity_key': 'bob-identity',
+              'signed_prekey': 'bob-signed-prekey',
+              'signed_prekey_signature': 'bob-signature',
+              'one_time_prekeys': ['bob-otk-1', 'bob-otk-2']
+          }, bob_token)
+          bundle = call('GET', '/v1/keys/bob_ci', token=alice_token)
+          assert bundle['identity_key'] == 'bob-identity'
+          assert bundle['one_time_prekey'] in ('bob-otk-1', 'bob-otk-2')
+
+          conversation = call('POST', '/v1/conversations', {
+              'kind': 'private', 'title': '', 'members': ['bob_ci']
+          }, alice_token)
+          conversation_id = conversation['id']
+
+          sent = call('POST', f'/v1/conversations/{conversation_id}/messages', {
+              'client_id': 'ci-message-1',
+              'ciphertext': 'opaque-ci-ciphertext',
+              'envelope': {'version': 1, 'scheme': 'ci-test-only'}
+          }, alice_token)
+          messages = call('GET', f'/v1/conversations/{conversation_id}/messages?after=0', token=bob_token)
+          assert len(messages['messages']) == 1
+          assert messages['messages'][0]['ciphertext'] == 'opaque-ci-ciphertext'
+          assert messages['messages'][0]['sequence'] == sent['sequence']
+          print('Lattice API smoke test passed')
+          PY

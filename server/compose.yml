@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: lattice
+      POSTGRES_USER: lattice
+      POSTGRES_PASSWORD: lattice-dev-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lattice -d lattice"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - lattice-postgres:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+
+  server:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LISTEN_ADDR: ":8080"
+      DATABASE_URL: "postgres://lattice:lattice-dev-only@postgres:5432/lattice?sslmode=disable"
+      JWT_SECRET: "replace-this-development-secret-before-deploying-123456"
+    ports:
+      - "8080:8080"
+
+volumes:
+  lattice-postgres:
